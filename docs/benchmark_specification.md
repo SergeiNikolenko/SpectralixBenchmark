@@ -1,1 +1,1 @@
-# полное описание бенчмарка
+# SpectralixBenchmark

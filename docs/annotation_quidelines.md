@@ -1,1 +1,1 @@
-# инструкции для разметчиков
+# SpectralixBenchmark

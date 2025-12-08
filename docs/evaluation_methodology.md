@@ -1,1 +1,1 @@
-# методика оценки моделей
+# SpectralixBenchmark
