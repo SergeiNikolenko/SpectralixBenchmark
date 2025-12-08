@@ -1,1 +1,1 @@
-# RAG материалы и выбор источников
+# SpectralixBenchmark
