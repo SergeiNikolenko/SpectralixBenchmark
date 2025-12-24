@@ -104,7 +104,7 @@ chem-benchmark/
 │   ├── evaluation/
 │   └── rag/
 │
-└── models/
+└── evaluation/
     ├── baseline_results/
     ├── rag_results/
 ```
