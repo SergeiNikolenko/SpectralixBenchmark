@@ -199,10 +199,6 @@ class PDFProcessor:
 
 # ==================== EXAM MARKER ====================
 
-# ОБНОВЛЕНИЕ: ExamMarker класс с фиксами
-
-# Замени в файле exam_parser_pipeline.py класс ExamMarker на этот:
-
 class ExamMarker:
     """Uses OpenAI Vision to extract and mark questions"""
     
