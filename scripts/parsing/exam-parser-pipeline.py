@@ -33,7 +33,7 @@ from openai import OpenAI
 class Config:
     """Global configuration for the pipeline"""
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-api-key-here")
-    MODEL_MARKER = "gpt-4.1-mini"
+    MODEL_MARKER = "gpt-4.1-mini" # Updated to a current vision model name if needed, or stick to yours
     MAX_TOKENS_MARKER = 3000
     
     BASE_DIR = Path("./exam_data")
@@ -85,7 +85,7 @@ class Question:
 
     def to_dict(self) -> Dict:
         """Convert to dictionary for JSON serialization"""
-        d = {
+        return {
             'question_id': self.question_id,
             'question_type': self.question_type.value if self.question_type else None,
             'question_text': self.question_text,
@@ -95,7 +95,6 @@ class Question:
             'status': self.status.value,
             'error_comment': self.error_comment,
         }
-        return d
 
 @dataclass
 class PageParseResult:
@@ -107,39 +106,36 @@ class PageParseResult:
     processing_time: float = 0.0
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
 
-    def to_dict(self) -> Dict:
+    def to_dict_for_jsonl(self) -> Dict:
+        """
+        Formats the object strictly according to the requirement:
+        Contains exam_id, page_id, path_to_page, and list of questions.
+        """
         return {
             "exam_id": self.exam_id,
             "page_id": self.page_id,
             "path_to_page": self.path_to_page,
-            "parsed_questions": [q.to_dict() for q in self.parsed_questions],
-            "processing_time": self.processing_time,
-            "timestamp": self.timestamp,
-            "stats": {
-                "total_questions": len(self.parsed_questions),
-                "ok_count": sum(1 for q in self.parsed_questions if q.status == ParseStatus.OK),
-                "error_count": sum(1 for q in self.parsed_questions if q.status != ParseStatus.OK),
-            }
+            "parsed_questions": [q.to_dict() for q in self.parsed_questions]
         }
 
 @dataclass
 class ExamMetadata:
-    """Exam metadata"""
     exam_id: str
     source: str
     exam_pdf_path: str
-    key_pdf_path: Optional[str] = None
-    pages_dir: str = ""
+    pages_dir: str
+    questions_path: str  # ADDED: path to the questions.jsonl file
     total_score: int = 100
     language: str = "en"
+    # REMOVED: key_pdf_path
 
     def to_dict(self) -> Dict:
         return {
             "exam_id": self.exam_id,
             "source": self.source,
             "exam_pdf_path": self.exam_pdf_path,
-            "key_pdf_path": self.key_pdf_path,
             "pages_dir": self.pages_dir,
+            "questions_path": self.questions_path,
             "total_score": self.total_score,
             "language": self.language,
         }
@@ -201,257 +197,15 @@ class PDFProcessor:
 
 class ExamMarker:
     """Uses OpenAI Vision to extract and mark questions"""
-    
-    MARKER_PROMPT = """
-    You are an expert chemistry exam OCR specialist.
 
-Your goal is to extract ALL questions and their corresponding answers from the provided exam page image and return them in a structured JSON format.
+    PROMPT_PATH = Path(__file__).parent / "prompt.txt"
 
-Analyze the image carefully and identify ALL distinct questions/tasks and answers visible on the page.
+    if not PROMPT_PATH.exists():
+        raise FileNotFoundError(
+            f"MARKER_PROMPT file not found at {PROMPT_PATH}"
+        )
 
-────────────────────────
-GENERAL RULES
-────────────────────────
-
-• Extract ONLY what is explicitly visible in the image.
-• DO NOT infer, guess, or hallucinate missing content.
-• Even if a question is partially unreadable, extract all readable parts.
-• If a page contains ONLY instructions, rules, or reference tables (no actual questions), return an empty array: [].
-
-────────────────────────
-QUESTION IDENTIFICATION
-────────────────────────
-
-question_id
-• Represents the main question number as shown in the exam.
-• Use only the main number: “1”, “2”, “3”, etc.
-
-SUB-QUESTIONS (a, b, c, …):
-
-DEFAULT RULE
-• Treat sub-questions as ONE SINGLE COMBINED QUESTION.
-
-EXCEPTION — SPLIT sub-questions ONLY IF ALL conditions apply:
-• Sub-questions are logically independent
-• Each sub-question expects its OWN answer type
-• Combining them would cause loss of answer_type correctness
-
-If split is required:
-• Create separate questions with the SAME question_id
-• Preserve sub-labels inside question_text:
-“A) …”, “B) …”
-
-Otherwise:
-• Merge all sub-parts into ONE question_text
-• Preserve structure using:
-“A) … B) … C) …”
-
-Example (combined):
-“3. (a) Name the product. (b) Explain the mechanism.”
-→ ONE question:
-question_id: “3”
-question_text: “A) Name the product. B) Explain the mechanism.”
-
-────────────────────────
-QUESTION TYPE
-────────────────────────
-
-question_type — choose ONE:
-
-“text”
-• Question contains ONLY text.
-• No visual elements are required to answer.
-
-“multimodal”
-• Question includes text PLUS required visual information such as:
-	•	Chemical structures
-	•	Reaction schemes
-	•	Graphs or plots
-	•	Spectra (NMR, MS, IR, etc.)
-	•	Diagrams or images
-	•	Visually presented answer options
-
-If non-textual information is required to understand or answer → use “multimodal”.
-
-────────────────────────
-QUESTION TEXT
-────────────────────────
-
-question_text
-• MUST include the FULL question content AND ALL available context.
-• ALWAYS merge context into text, including:
-	•	Answer options
-	•	Labels
-	•	Given values
-	•	Reaction schemes (described textually)
-• Include all sub-parts using:
-“A) … B) … C) …”
-
-IMPORTANT — CONTEXT DESCRIPTION RULE
-• NEVER write vague placeholders like:
-“(scheme shown)”, “(image above)”, “(see diagram)”
-• ALWAYS attempt to describe the visible context in words:
-	•	reagents
-	•	arrows
-	•	positions of blanks
-	•	labels near structures
-
-If context cannot be adequately described → mark status = “unreadable”.
-
-MANDATORY WORD NORMALIZATION
-If ANY of the following appear in the image:
-circle, highlight, mark, underline, box, blank
-
-They MUST be replaced in question_text with:
-choose / select / explicit placeholders {box_1}, {box_2}
-
-Example:
-“Circle the correct answer” → “Choose the correct answer”
-
-Answer options MUST be normalized as:
-“A) … B) … C) …” OR “1) … 2) … 3) …”
-
-────────────────────────
-ANSWER TYPE
-────────────────────────
-
-answer_type — choose ONE
-(choose the MOST COMPLEX type if sub-parts differ):
-
-single_choice
-• Exactly ONE correct option
-• canonical_answer: “{A}”
-
-multiple_choice
-• Multiple correct options
-• canonical_answer: “{A;B;D}”
-
-numeric
-• Numerical value(s): mass, m/z, yield, chemical shift, etc.
-• “{3.5}” or “{23;49;4.5}”
-
-text
-• Short free-text answer
-• “{text}”
-
-ordering
-• Ordering / ranking task
-• canonical_answer MUST contain ONLY indices
-• “{1;4;6;5}”
-• NEVER include item names
-
-structure
-• Chemical structure identification
-• “{text}”
-
-full_synthesis
-• Multi-step synthesis with reagents
-• “{text}”
-
-reaction_description
-• Reaction or mechanism description
-• “{text}”
-
-property_determination
-• Chemical properties (acidity, aromaticity, stereochemistry, spectra)
-
-FILL-IN CASES
-If placeholders exist, canonical_answer MUST map values explicitly.
-
-Example:
-question_text:
-“Complete the reaction: Na + {box_1} → Cr + {box_2}”
-
-canonical_answer:
-“{box_1=Cl; box_2=Mg}”
-
-────────────────────────
-MAX SCORE
-────────────────────────
-
-max_score
-• Extract TOTAL points for the question if visible
-• If missing or unclear → set to 0
-
-────────────────────────
-CANONICAL ANSWER
-────────────────────────
-
-canonical_answer — ALWAYS REQUIRED.
-
-Rules:
-• ONLY the answer, NO explanations
-• Preserve sub-structure if present:
-“A) …; B) …; C) …”
-• If answer cannot be extracted → “” (empty string)
-• NEVER omit this field
-
-────────────────────────
-STATUS AND ERRORS
-────────────────────────
-
-status — one of:
-“ok”
-“unreadable”
-
-Set status = “unreadable” IF:
-	1.	Parts of question_text are unreadable or missing
-	2.	canonical_answer cannot be confidently extracted
-	3.	The task requires drawing / sketching / handwriting
-
-IMPORTANT
-• Even if status = “unreadable”, extract ALL readable fields.
-
-error_comment
-• Explain EXACTLY what could not be read
-• Otherwise set to null
-
-────────────────────────
-OUTPUT FORMAT
-────────────────────────
-
-Return ONLY a valid JSON array.
-
-ALL fields are REQUIRED for EACH question:
-question_id, question_type, question_text, answer_type, max_score, canonical_answer, status, error_comment
-
-────────────────────────
-EXAMPLE OUTPUT
-────────────────────────
-
-[
-  {
-    "question_id": "1",
-    "question_type": "text",
-    "question_text": "What is the IUPAC name of 2-methylpropene?",
-    "answer_type": "text",
-    "max_score": 5,
-    "canonical_answer": "2-methylpropene or isobutylene",
-    "status": "ok",
-    "error_comment": null
-  },
-{
-  "question_id": "2",
-  "question_type": "multimodal",
-  "question_text": "A) Complete the reaction: phenol + Br2 → ? (reaction scheme shown)",
-  "answer_type": "structure",
-  "max_score": 8,
-  "canonical_answer": "A) 2,4,6-tribromophenol",
-  "status": "ok",
-  "error_comment": null
-},
-  {
-    "question_id": "3",
-    "question_type": null,
-    "question_text": null,
-    "answer_type": null,
-    "max_score": null,
-    "canonical_answer": "",
-    "status": "unreadable",
-    "error_comment": "Chemical structure diagram is too blurry to read"
-  }
-]
-"""
+    MARKER_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
 
     def __init__(self):
         self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
@@ -655,7 +409,6 @@ class ExamPipeline:
     def process_exam(self, 
                     pdf_path: str, 
                     exam_id: Optional[str] = None,
-                    key_pdf_path: Optional[str] = None,
                     source: str = "unknown") -> Dict:
         """Process a single exam PDF"""
         if exam_id is None:
@@ -680,13 +433,16 @@ class ExamPipeline:
                 self.logger.error(f"Failed to extract images from {pdf_path}")
                 return self._error_result(exam_id, "No pages extracted from PDF")
 
-            # Create exam metadata
+            # Define path for questions.jsonl
+            questions_jsonl_path = exam_output_dir / "questions.jsonl"
+
+            # Create exam metadata (MODIFIED: removed key_pdf_path, added questions_path)
             metadata = ExamMetadata(
                 exam_id=exam_id,
                 source=source,
                 exam_pdf_path=pdf_path,
-                key_pdf_path=key_pdf_path,
                 pages_dir=str(exam_pages_dir),
+                questions_path=str(questions_jsonl_path), # Added
                 language="en"
             )
             
@@ -697,27 +453,28 @@ class ExamPipeline:
             self.logger.info(f"Saved exam metadata to {metadata_path}")
 
             # Parse each page
-            all_results = []
-            all_questions = []
+            all_page_results = [] # Store PageParseResult objects
+            all_questions_flat = [] # Keep for summary stats
             error_questions = []
 
             for page_num, image_path in page_images:
                 self.logger.info(f"Parsing page {page_num}/{len(page_images)}")
                 result = self.marker.parse_page(image_path, exam_id, page_num)
-                all_results.append(result)
-                all_questions.extend(result.parsed_questions)
+                
+                all_page_results.append(result)
+                all_questions_flat.extend(result.parsed_questions)
                 
                 error_questions.extend([
                     q for q in result.parsed_questions 
                     if q.status in [ParseStatus.ERROR, ParseStatus.UNREADABLE]
                 ])
 
-            # Save results
-            self._save_results(exam_id, exam_output_dir, all_questions)
+            # Save results (MODIFIED: Pass full page results, not flat questions)
+            self._save_results(exam_id, exam_output_dir, all_page_results)
             self._save_error_report(exam_id, error_questions)
 
             # Generate summary
-            summary = self._generate_summary(exam_id, all_questions)
+            summary = self._generate_summary(exam_id, all_questions_flat)
             
             return {
                 "status": "success",
@@ -731,15 +488,16 @@ class ExamPipeline:
             return self._error_result(exam_id, str(e))
 
     def _save_results(self, exam_id: str, output_dir: Path, 
-                     all_questions: List[Question]):
-        """Save results to JSON files"""
-        # Save questions.jsonl
+                     page_results: List[PageParseResult]):
+        """Save results to JSON files in the requested grouped format"""
+        # Save questions.jsonl (MODIFIED STRUCTURE)
         questions_file = output_dir / "questions.jsonl"
         with open(questions_file, 'w') as f:
-            for q in all_questions:
-                f.write(json.dumps(q.to_dict()) + '\n')
+            for page_res in page_results:
+                # Use to_dict_for_jsonl to match exact required structure
+                f.write(json.dumps(page_res.to_dict_for_jsonl()) + '\n')
 
-        self.logger.info(f"Saved {len(all_questions)} questions to {questions_file}")
+        self.logger.info(f"Saved {len(page_results)} pages to {questions_file}")
 
     def _save_error_report(self, exam_id: str, error_questions: List[Question]):
         """Save error report for manual review"""
@@ -807,17 +565,27 @@ class ExamPipeline:
 # ==================== MAIN ====================
 
 def main():
-    """Example usage"""
     pipeline = ExamPipeline()
-    
-    pdf_path = "./exam_data/exams/exam_1.pdf"
-    result = pipeline.process_exam(
-        pdf_path=pdf_path,
-        exam_id="exam_1",
-        source="mit_spring_2005"
-    )
-    
-    print(json.dumps(result, indent=2))
+
+    exams_dir = Path("./exam_data/exams")
+    results = []
+
+    if not exams_dir.exists():
+        logging.warning(f"Exams directory {exams_dir} does not exist. Please create it and add PDFs.")
+        return
+
+    for pdf_path in sorted(exams_dir.glob("*.pdf")):
+        exam_id = pdf_path.stem
+
+        result = pipeline.process_exam(
+            pdf_path=str(pdf_path),
+            exam_id=exam_id,
+            source=""
+        )
+
+        results.append(result)
+
+    print(json.dumps(results, indent=2))
 
 if __name__ == "__main__":
     main()
