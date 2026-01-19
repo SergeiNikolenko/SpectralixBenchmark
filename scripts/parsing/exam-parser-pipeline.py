@@ -33,7 +33,7 @@ from openai import OpenAI
 class Config:
     """Global configuration for the pipeline"""
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-api-key-here")
-    MODEL_MARKER = "gpt-4.1-mini" # Updated to a current vision model name if needed, or stick to yours
+    MODEL_MARKER = "gpt-4.1-mini"
     MAX_TOKENS_MARKER = 3000
     
     BASE_DIR = Path("./exam_data")
@@ -217,43 +217,40 @@ class ExamMarker:
             return base64.b64encode(image_file.read()).decode("utf-8")
 
     def parse_page(self, image_path: str, exam_id: str, page_id: int) -> PageParseResult:
-        """Parse exam page using OpenAI Vision"""
         import time
         start_time = time.time()
 
         try:
             base64_image = self.encode_image(image_path)
 
-            response = self.client.chat.completions.create(
-                model=Config.MODEL_MARKER,
-                max_tokens=Config.MAX_TOKENS_MARKER,
-                messages=[
+            # ОПРЕДЕЛЯЕМ ПАРАМЕТР ТОКЕНОВ: o1 требует max_completion_tokens
+            token_param = "max_completion_tokens" if "o1" in Config.MODEL_MARKER else "max_tokens"
+            
+            payload = {
+                "model": Config.MODEL_MARKER,
+                "messages": [
                     {
                         "role": "user",
                         "content": [
-                            {
-                                "type": "text",
-                                "text": self.MARKER_PROMPT,
-                            },
+                            {"type": "text", "text": self.MARKER_PROMPT},
                             {
                                 "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{base64_image}",
-                                },
+                                "image_url": {"url": f"data:image/png;base64,{base64_image}"},
                             },
                         ],
                     }
                 ],
-            )
+            }
+            # Динамически добавляем нужный параметр
+            payload[token_param] = Config.MAX_TOKENS_MARKER
+
+            response = self.client.chat.completions.create(**payload)
 
             response_text = response.choices[0].message.content
             questions = self._parse_response(response_text, exam_id, page_id)
 
             processing_time = time.time() - start_time
-            self.logger.info(
-                f"Parsed page {page_id} for exam {exam_id}: "
-                f"{len(questions)} questions in {processing_time:.2f}s"
-            )
+            self.logger.info(f"Parsed page {page_id} for exam {exam_id}: {len(questions)} questions")
 
             return PageParseResult(
                 exam_id=exam_id,
@@ -265,13 +262,7 @@ class ExamMarker:
 
         except Exception as e:
             self.logger.error(f"Error parsing page {page_id}: {e}")
-            return PageParseResult(
-                exam_id=exam_id,
-                page_id=page_id,
-                path_to_page=image_path,
-                parsed_questions=[],
-                processing_time=time.time() - start_time,
-            )
+            return PageParseResult(exam_id=exam_id, page_id=page_id, path_to_page=image_path)
 
     def _parse_response(self, response_text: str, exam_id: str, page_id: int) -> List[Question]:
         """Parse JSON response from model"""
@@ -385,26 +376,33 @@ class ExamMarker:
 # ==================== PIPELINE ORCHESTRATOR ====================
 
 class ExamPipeline:
-    """Main orchestrator for the exam marking pipeline"""
-    
     def __init__(self):
+        Config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        Config.ERRORS_DIR.mkdir(parents=True, exist_ok=True)
+        Config.PAGES_DIR.mkdir(parents=True, exist_ok=True)
+        
         self.logger = self._setup_logging()
         self.pdf_processor = PDFProcessor()
         self.marker = ExamMarker()
-        Config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        Config.ERRORS_DIR.mkdir(parents=True, exist_ok=True)
 
     def _setup_logging(self) -> logging.Logger:
-        """Configure logging"""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(Config.OUTPUT_DIR / 'pipeline.log'),
-                logging.StreamHandler()
-            ]
-        )
-        return logging.getLogger(__name__)
+            # Убеждаемся еще раз, что путь существует перед созданием Handler
+            log_file = Config.OUTPUT_DIR / 'pipeline.log'
+            
+            logger = logging.getLogger("ExamPipeline")
+            logger.setLevel(logging.INFO)
+            
+            # Чтобы не дублировать логи при перезапуске в Notebook
+            if not logger.handlers:
+                fh = logging.FileHandler(log_file)
+                sh = logging.StreamHandler()
+                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                fh.setFormatter(formatter)
+                sh.setFormatter(formatter)
+                logger.addHandler(fh)
+                logger.addHandler(sh)
+                
+            return logger
 
     def process_exam(self, 
                     pdf_path: str, 
