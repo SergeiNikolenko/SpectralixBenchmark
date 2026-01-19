@@ -57,6 +57,8 @@ Historical iteration snapshots of the pipeline:
 
 ## Usage
 
+Before running the scripts, ensure you have set: export openai_api_key="YOUR-API-KEY-HERE" in your .env file.
+
 ### 1. Prepare Exam PDFs
 Place PDF files in `exam_data/exams/`
 
