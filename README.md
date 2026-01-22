@@ -33,80 +33,66 @@ Each entry in the benchmark follows the unified schema:
 
 ```json
 {
-  "example_id": "string",
-  "source_file": "string",
-  "page": "integer",
-  "university": "string",
-  "year": "string",
-  "question_number": "string",
-
-  "question_type": "mcq | short_answer | numeric | definition | explanation | ordering | mechanism_text | ms_text",
-
+  "exam_id": "string",
+  "page_id": "integer",
+  "path_to_page": "string",
+  "question_id": "string",
+  "question_type": "text | mcq | numeric | short_answer",
   "question_text": "string",
-  "choices": ["string"],
-  "context": "string or null",
-
-  "answer_type": "label | numeric | text | order",
-  "canonical_answer": {},
-  "solution_explanation": "string",
-
-  "rubric": {
-    "correct_answer": "string or structured object",
-    "partial_credit_steps": { "step_name": 0.5 },
-    "tolerances": {
-      "numeric_abs": 0.1,
-      "numeric_rel": 0.05
-    }
-  },
-
-  "topic_tags": ["string"],
-  "difficulty": 1,
-  "notes": "string"
+  "answer_type": "single_choice | multiple_choice | numeric | text",
+  "max_score": "integer",
+  "canonical_answer": "string or array",
+  "status": "ok | error",
+  "error_comment": "string or null"
 }
 
 ```
 
-**Supported question types include:**
+**Supported answer types (answer_type):**
 
-- Multiple choice (MCQ)  
-- Short answer  
-- Numeric problems (with tolerances)  
-- Definitions  
-- Explanations  
-- Ordering tasks  
-- Organic chemistry reaction mechanisms (text-based)  
-- MS2 spectrum interpretation
+- `single_choice` — Single answer choice
+- `multiple_choice` — Multiple answer choices
+- `numeric` — Numeric answer
+- `text` — Text answer
+- `ordering` — Ordering/ranking
+- `structure` — Structure determination
+- `full_synthesis` — Full synthesis
+- `reaction_description` — Reaction description
+- `property_determination` — Property determination
+- `msms_structure_prediction` — MS/MS spectra interpretation
 
 ## 📁 Repository Structure
 
 ```bash
-chem-benchmark/
+SpectralixBenchmark/
 │
 ├── README.md
-├── LICENSE
 │
-├── docs/
-│   ├── benchmark_specification.md
-│   ├── annotation_guidelines.md
-│   ├── evaluation_methodology.md
-│   └── rag_design.md
+├── benchmark/ # Final benchmark dataset or its parts
 │
 ├── data/
-│   ├── raw/
-│   │   ├── organic/
-│   │   └── mass_spec/
-│   ├── ai_parsed/
-│   ├── benchmark/
-│   └── rag_corpus/
+│   ├── mass_spec/ # Mass spectrometry data
+│   └── organic/ # Organic chemistry data
 │
 ├── scripts/
 │   ├── parsing/
-│   ├── evaluation/
-│   └── rag/
+│   │   ├── exam_data/
+│   │   │   ├── exams/ # Exam PDFs that passed the parser
+│   │   │   ├── full_exams/ # Full list of exam PDFs
+│   │   │   ├── output/ # Parsed exams
+│   │   │   └── pages/ # Exam *png pages
+│   │   ├── iterations/
+│   │   ├── benchmark_collection.py
+│   │   ├── exam-parser-pipeline.py
+│   │   ├── requirements.txt
+│   │   └── README.md
+│   ├── evaluation/ # Evaluation scripts
 │
 └── evaluation/
     ├── baseline_results/
-    ├── rag_results/
+    │   └── README.md
+    └── rag_results/
+        └── README.md
 ```
 ## 🤝 How to Contribute
 
