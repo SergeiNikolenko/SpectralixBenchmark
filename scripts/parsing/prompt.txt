@@ -9,7 +9,6 @@ GENERAL RULES
 ────────────────────────
 
 • Extract ONLY what is explicitly visible in the image.
-• DO NOT infer, guess, or hallucinate missing content.
 • Even if a question is partially unreadable, extract ALL readable parts.
 • If a page contains ONLY instructions, rules, or reference tables (no actual questions), return an empty array: [].
 
@@ -21,97 +20,53 @@ question_id
 • Represents the main question number as shown in the exam.
 • Use only the main number: "1", "2", "3", etc.
 
-SUB-QUESTIONS (a, b, c, …)
-
-DEFAULT RULE
+SUB-QUESTIONS or SUB-PARTS(a, b, c, …)
 • Treat sub-questions as ONE SINGLE COMBINED QUESTION.
-
-EXCEPTION — SPLIT sub-questions ONLY IF ALL conditions apply:
-• Sub-questions are logically independent
-• Each sub-question expects its OWN answer type
-• Combining them would cause loss of answer_type correctness
-
-If split is required:
-• Create separate questions with the SAME question_id
-• Preserve sub-labels inside question_text:
-  "A) …", "B) …"
-
-Otherwise:
-• Merge all sub-parts into ONE question_text
-• Preserve structure using:
-  "A) … B) … C) …"
+• For sub-questions or options preserve next structure:
+  "a) … b) … c) …"
 
 ────────────────────────
-QUESTION TYPE
-────────────────────────
-
-question_type — choose ONE:
-
-"text"
-• Question contains ONLY text.
-• No visual elements are required to answer.
-
-"multimodal"
-• Question includes text PLUS required visual information such as:
-  - Chemical structures
-  - Reaction schemes
-  - Graphs or plots
-  - Spectra (NMR, MS, IR, etc.)
-  - Diagrams or images
-  - Visually presented answer options
-
-If non-textual information is required to understand or answer → use "multimodal".
-
-────────────────────────
-QUESTION TEXT
+QUESTION_TEXT — BOX & PLACEHOLDER RULES
 ────────────────────────
 
 question_text
-• MUST include the FULL question content AND ALL available context.
+• MUST include the FULL question content AND ALL available context that is necessary to solve task.
 • ALWAYS merge context into text, including:
   - Answer options
   - Labels
   - Given values
-  - Reaction schemes (described textually)
+  - Reaction schemes (described textually or with SMILES notation)
 • Include all sub-parts using:
   "A) … B) … C) …"
-• Do NOT include answers or solutions.
+• NEVER include final answers, products, score/points or resolved structures into question_text.
+• question_text MUST ALWAYS represent an UNSOLVED task.
 
-CRITICAL SEPARATION RULE
-• question_text MUST NEVER contain:
-  - final answers
-  - reaction products
-  - correct options
-  - resolved structures
-• Even if the answer is visually obvious, it MUST appear ONLY in canonical_answer.
-• question_text must ALWAYS represent an UNSOLVED task.
-
-BOX / BLANK RULE
+BOX RULE
 • If the image shows text INSIDE a box / blank:
   - Treat it as the EXPECTED ANSWER
   - DO NOT include it in question_text
-• In question_text, use explicit placeholders only:
-  {box_1}, {box_2}, …
+• In question_text, to describe context use explicit placeholders only:
+    {arrow_left_id} / {arrow_right_id} — only if the task explicitly asks to determine direction.
+    {structure_box_id} — for structure answers (SMILES only if unambiguous).
+    {iso_box_id} — for stereochemical or isomeric answers.
+    {product_box_id} — for reaction product answers.
+    {box_id} — for ordering, numeric, or generic fill-in tasks.
+
+If the correct placeholder type is unclear, or if visual context cannot be adequately described textually → mark status = "unreadable".
 
 MANDATORY WORD NORMALIZATION
-If ANY of the following appear in the image:
-circle, highlight, mark, underline, box, blank
+• If ANY of the following original words appear in the image:
+circle, highlight, mark, underline, box, blank, label, DRAW.
+They must be replaced with neutral verbs (choose / select / determine etc) and placeholders.
+Original words MUST NOT appear in question_text.
 
-They MUST be replaced in question_text with:
-choose / select / placeholders {box_1}, {box_2}
-
-Answer options MUST be normalized as:
-"A) … B) … C) …" OR "1) … 2) … 3) …"
 
 CONTEXT DESCRIPTION RULE
 • NEVER write vague placeholders like:
   "(scheme shown)", "(image above)", "(see diagram)"
-• ALWAYS attempt to describe visible context in words:
-  - reagents
-  - arrows
-  - labels
-  - relative positions of blanks
-• If context cannot be adequately described → mark status = "unreadable"
+because the final questions must be solvable using text alone, without relying on images, diagrams, or implicit visual context.
+Instead try to add completely textual descriptions of the visual context.
+• If context cannot be adequately or you aren't sure → mark status = "unreadable"
 
 ────────────────────────
 ANSWER TYPE
@@ -122,11 +77,11 @@ answer_type — choose ONE
 
 single_choice
 • Exactly ONE correct option
-• canonical_answer format: "A"
+• canonical_answer format: "A ..."
 
 multiple_choice
 • Multiple correct options
-• canonical_answer format: "A;B;D"
+• canonical_answer format: "A ...;B ..."
 
 numeric
 • Numerical value(s): mass, m/z, yield, chemical shift, etc.
@@ -138,13 +93,11 @@ text
 
 ordering
 • Ordering / ranking task
-• canonical_answer MUST contain ONLY indices
-• "1;4;6;5"
-• NEVER include item names
+• "{box_1}=3; {box_2}=1; ..."
 
 structure
 • Chemical structure identification
-• Use SMILES if unambiguous, otherwise short description
+• Use SMILES or text representation
 
 full_synthesis
 • Multi-step synthesis with reagents
@@ -165,16 +118,13 @@ question_text:
 canonical_answer:
 "box_1=Cl; box_2=Mg"
 
-IMPORTANT
-• canonical_answer MUST NOT contain curly braces {}
-
 ────────────────────────
 MAX SCORE
 ────────────────────────
 
 max_score
 • Extract TOTAL points for the question if visible
-• If missing or unclear → set to 0
+• If missing or unclear → set to 1
 
 ────────────────────────
 CANONICAL ANSWER
@@ -186,12 +136,12 @@ Rules:
 • ONLY the answer, NO explanations
 • Preserve sub-structure if present:
   "A) …; B) …; C) …"
-• If answer cannot be extracted → "" (empty string)
+• If answer cannot be extracted → "" (empty string) and make status = "unreadable"
 • NEVER omit this field
 
 STRUCTURE REPRESENTATION RULE
-• Prefer SMILES if the structure is clearly visible and unambiguous
-• NEVER guess or infer SMILES
+• Prefer SMILES or text description if the structure is clearly visible and unambiguous
+• NEVER guess or infer SMILES, so if you are not sure then make make status = "unreadable"
 
 ────────────────────────
 STATUS AND ERRORS
@@ -204,24 +154,14 @@ status — one of:
 Set status = "unreadable" IF:
 1. Parts of question_text are unreadable or missing
 2. canonical_answer cannot be confidently extracted
-3. The task requires drawing / sketching / handwriting
-   (contains words like "draw", "sketch", "depict")
-
-DRAWING TASK RULE
-• Questions that REQUIRE drawing MUST NOT be included as valid questions
-• They MUST still return an entry with:
-  - status = "unreadable"
-  - error_comment explaining exclusion
-
-Example error_comment:
-"Task requires drawing and is not text-oriented"
-
-IMPORTANT
-• Even if status = "unreadable", extract ALL readable fields.
+and add error_comment explaining exclusion, further such questions will be routed for human annotation 
 
 error_comment
 • Explain EXACTLY what could not be read or why the task was excluded
 • Otherwise set to null
+
+IMPORTANT
+• Even if status = "unreadable", try to extract ALL other readable fields.
 
 ────────────────────────
 OUTPUT FORMAT
@@ -230,7 +170,7 @@ OUTPUT FORMAT
 Return ONLY a valid JSON array.
 
 ALL fields are REQUIRED for EACH question:
-question_id, question_type, question_text, answer_type, max_score, canonical_answer, status, error_comment
+question_id, question_text, answer_type, max_score, canonical_answer, status, error_comment
 
 ────────────────────────
 EXAMPLE OUTPUT
@@ -239,32 +179,48 @@ EXAMPLE OUTPUT
 [
   {
     "question_id": "1",
-    "question_type": "text",
-    "question_text": "What is the IUPAC name of 2-methylpropene?",
+    "question_text": "What is the IUPAC name of the alkene CH2=C(CH3)2?",
     "answer_type": "text",
     "max_score": 5,
-    "canonical_answer": "2-methylpropene or isobutylene",
+    "canonical_answer": "2-methylpropene",
     "status": "ok",
     "error_comment": null
   },
-{
-  "question_id": "2",
-  "question_type": "multimodal",
-  "question_text": "A) Complete the reaction: phenol + Br2 → ? (reaction scheme shown)",
-  "answer_type": "structure",
-  "max_score": 8,
-  "canonical_answer": "A) 2,4,6-tribromophenol",
-  "status": "ok",
-  "error_comment": null
-},
+  {
+    "question_id": "2",
+    "question_text": "A) Complete the reaction: OC1=CC=CC=C1 + Br2 → {product_box_1}.",
+    "answer_type": "structure",
+    "max_score": 8,
+    "canonical_answer": "A) O=C1=CC(Br)=CC(Br)=C1Br",
+    "status": "ok",
+    "error_comment": null
+  },
   {
     "question_id": "3",
-    "question_type": null,
+    "question_text": "Indicate whether the reactants or products are favored at equilibrium: CH3COOH + OH− {arrow_right_1} or {arrow_left_1} CH3COO− + H2O.",
+    "answer_type": "single_choice",
+    "max_score": 4,
+    "canonical_answer": "{arrow_right_1}",
+    "status": "ok",
+    "error_comment": null
+  },
+  {
+    "question_id": "4",
+    "question_text": "Rank the following carbocations according to stability (1 = most stable, 5 = least stable): CC(C)C[C+](C)C {box_1}, C/C(OC)=C/[C+](C)C {box_2}, CC(C)CC(C)[CH2+] {box_3}, C/C(C)=C/[C+](C)C {box_4}, CC(C)[CH+]C(C)C {box_5}.",
+    "answer_type": "ordering",
+    "max_score": 10,
+    "canonical_answer": "{box_1}=3; {box_2}=1; {box_3}=5; {box_4}=2; {box_5}=4",
+    "status": "ok",
+    "error_comment": null
+  },
+  {
+    "question_id": "5",
     "question_text": null,
     "answer_type": null,
     "max_score": null,
     "canonical_answer": "",
     "status": "unreadable",
-    "error_comment": "Chemical structure diagram is too blurry to read"
-  }
+    "error_comment": "Chemical structures are present only as images and cannot be represented using text or placeholders without reconstruction."
+  },
+  ...
 ]
