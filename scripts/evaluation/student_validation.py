@@ -33,6 +33,7 @@ def call_chemllm(
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
         "temperature": temperature,
+        "stream": False,  # Explicitly disable streaming
     }
     
     for attempt in range(max_retries):
@@ -44,12 +45,42 @@ def call_chemllm(
                 timeout=timeout,
             )
             response.raise_for_status()
-            data = response.json()
             
-            if "choices" in data and len(data["choices"]) > 0:
+            try:
+                data = response.json()
+            except json.JSONDecodeError as e:
+                # Try to handle streaming response if stream=False didn't work
+                content = response.text.strip()
+                if content:
+                    # Try to parse as NDJSON (multiple JSON objects)
+                    lines = content.split('\n')
+                    full_response = ""
+                    for line in lines:
+                        if line.strip():
+                            try:
+                                chunk = json.loads(line)
+                                if "message" in chunk and "content" in chunk["message"]:
+                                    full_response += chunk["message"]["content"]
+                                elif "response" in chunk:
+                                    full_response += chunk["response"]
+                            except json.JSONDecodeError:
+                                continue
+                    if full_response:
+                        return full_response.strip()
+                raise ValueError(f"Failed to parse response as JSON: {e}")
+            
+            # Handle different response formats
+            if "message" in data and "content" in data["message"]:
+                # OpenAI-compatible format
+                return data["message"]["content"].strip()
+            elif "choices" in data and len(data["choices"]) > 0:
+                # Another OpenAI format variant
                 return data["choices"][0]["message"]["content"].strip()
+            elif "response" in data:
+                # Ollama direct format
+                return data["response"].strip()
             else:
-                raise ValueError("No choices in response")
+                raise ValueError(f"Unexpected response format: {data}")
                 
         except (requests.RequestException, KeyError, ValueError) as e:
             if attempt == max_retries - 1:
