@@ -130,7 +130,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--benchmark-path",
         type=Path,
-        default="/Users/kokosiknn/Desktop/SpectralixBenchmark/SpectralixBenchmark/benchmark/benchmark_v1_0.jsonl",
+        required=True,
         help="Path to the benchmark JSONL file",
     )
     parser.add_argument(
