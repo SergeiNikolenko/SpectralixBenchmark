@@ -34,16 +34,13 @@ Each entry in the benchmark follows the unified schema:
 ```json
 {
   "exam_id": "string",
-  "page_id": "integer",
-  "path_to_page": "string",
+  "page_id": "string",
   "question_id": "string",
-  "question_type": "text | mcq | numeric | short_answer",
+  "question_type": "text | multimodal | ...",
   "question_text": "string",
-  "answer_type": "single_choice | multiple_choice | numeric | text",
-  "max_score": "integer",
-  "canonical_answer": "string or array",
-  "status": "ok | error",
-  "error_comment": "string or null"
+  "answer_type": "single_choice | multiple_choice | ordering | numeric | text | structure | full_synthesis | reaction_description | property_determination | msms_structure_prediction",
+  "max_score": "number",
+  "canonical_answer": "string"
 }
 
 ```
@@ -117,7 +114,7 @@ data/raw/mass_spec/
 Create JSONL entries following the official schema:
 
 ```bash
-data/benchmark//.jsonl
+benchmark/<dataset_name>.jsonl
 ```
 
 Each entry must include:
@@ -125,9 +122,7 @@ Each entry must include:
 - Clean question text  
 - University + year + page  
 - Canonical answer  
-- Rubric  
-- Topic tags  
-- Difficulty  
+- `rubric`, `topic_tags`, `difficulty` are planned for `vNext` and are not mandatory in `v1.0`  
 
 ### 3. Add new RAG materials
 
