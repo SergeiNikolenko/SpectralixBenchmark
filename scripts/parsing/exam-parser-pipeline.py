@@ -1,5 +1,6 @@
-# Пайплайн автоматической разметки экзаменов с ChatGPT / OpenAI Vision API
+# Automated exam parsing pipeline with OpenAI Vision/API backends
 
+import argparse
 import os
 import json
 import base64
@@ -7,10 +8,19 @@ import hashlib
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import re
+import sys
+import time
+
+# Ensure repository root is importable when script is run as a file.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.agents import AgentRuntime, AgentRuntimeError
 
 try:
     import fitz  # PyMuPDF
@@ -26,13 +36,17 @@ except ImportError:
     PDF2IMAGE_AVAILABLE = False
     logging.warning("pdf2image not available. Install with: pip install pdf2image")
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # ==================== CONFIGURATION ====================
 
 class Config:
     """Global configuration for the pipeline"""
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "your-api-key-here")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     MODEL_MARKER = "gpt-4.1-mini"
     MAX_TOKENS_MARKER = 3000
     
@@ -68,6 +82,11 @@ class ParseStatus(str, Enum):
     OK = "ok"
     UNREADABLE = "unreadable"
     ERROR = "error"
+
+
+TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
+FALSY_VALUES = {"0", "false", "no", "n", "off"}
+PARSE_STATUS_VALUES = {status.value for status in ParseStatus}
 
 # ==================== DATA CLASSES ====================
 
@@ -207,8 +226,18 @@ class ExamMarker:
 
     MARKER_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
 
-    def __init__(self):
-        self.client = OpenAI(api_key=Config.OPENAI_API_KEY)
+    def __init__(self, agent_runtime: Optional[AgentRuntime] = None):
+        self.agent_runtime = agent_runtime
+        self.client = (
+            OpenAI(api_key=Config.OPENAI_API_KEY, base_url=Config.OPENAI_BASE_URL)
+            if OpenAI is not None
+            else None
+        )
+        if self.client is None and self.agent_runtime is None:
+            raise RuntimeError(
+                "openai package is required for legacy parser mode. "
+                "Install with: pip install openai"
+            )
         self.logger = logging.getLogger(__name__)
 
     def encode_image(self, image_path: str) -> str:
@@ -217,37 +246,45 @@ class ExamMarker:
             return base64.b64encode(image_file.read()).decode("utf-8")
 
     def parse_page(self, image_path: str, exam_id: str, page_id: int) -> PageParseResult:
-        import time
         start_time = time.time()
 
         try:
-            base64_image = self.encode_image(image_path)
+            if self.agent_runtime is not None:
+                response_text = self.agent_runtime.parse_page(
+                    image_path=image_path,
+                    exam_id=exam_id,
+                    page_id=page_id,
+                    marker_prompt=self.MARKER_PROMPT,
+                )
+            else:
+                if self.client is None:
+                    raise RuntimeError("openai package is required for legacy parser mode")
+                base64_image = self.encode_image(image_path)
 
-            # ОПРЕДЕЛЯЕМ ПАРАМЕТР ТОКЕНОВ: o1 требует max_completion_tokens
-            token_param = "max_completion_tokens" if "o1" in Config.MODEL_MARKER else "max_tokens"
-            
-            payload = {
-                "model": Config.MODEL_MARKER,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": self.MARKER_PROMPT},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": f"data:image/png;base64,{base64_image}"},
-                            },
-                        ],
-                    }
-                ],
-            }
-            # Динамически добавляем нужный параметр
-            payload[token_param] = Config.MAX_TOKENS_MARKER
+                # o1 models require max_completion_tokens.
+                token_param = "max_completion_tokens" if "o1" in Config.MODEL_MARKER else "max_tokens"
 
-            response = self.client.chat.completions.create(**payload)
+                payload = {
+                    "model": Config.MODEL_MARKER,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": self.MARKER_PROMPT},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/png;base64,{base64_image}"},
+                                },
+                            ],
+                        }
+                    ],
+                }
+                payload[token_param] = Config.MAX_TOKENS_MARKER
 
-            response_text = response.choices[0].message.content
-            questions = self._parse_response(response_text, exam_id, page_id)
+                response = self.client.chat.completions.create(**payload)
+                response_text = response.choices[0].message.content
+
+            questions = self._parse_response(response_text, page_id)
 
             processing_time = time.time() - start_time
             self.logger.info(f"Parsed page {page_id} for exam {exam_id}: {len(questions)} questions")
@@ -260,11 +297,14 @@ class ExamMarker:
                 processing_time=processing_time,
             )
 
+        except AgentRuntimeError as e:
+            self.logger.error(f"Agent error while parsing page {page_id}: status={e.status} error={e.message}")
+            return PageParseResult(exam_id=exam_id, page_id=page_id, path_to_page=image_path)
         except Exception as e:
             self.logger.error(f"Error parsing page {page_id}: {e}")
             return PageParseResult(exam_id=exam_id, page_id=page_id, path_to_page=image_path)
 
-    def _parse_response(self, response_text: str, exam_id: str, page_id: int) -> List[Question]:
+    def _parse_response(self, response_text: str, page_id: int) -> List[Question]:
         """Parse JSON response from model"""
         questions = []
         
@@ -305,25 +345,25 @@ class ExamMarker:
         """Construct Question object from parsed item"""
         try:
             # Extract status first
-            status_str = item.get('status', 'ok')
-            if status_str not in [ps.value for ps in ParseStatus]:
-                status_str = 'ok'
+            status_str = str(item.get("status", ParseStatus.OK.value) or ParseStatus.OK.value)
+            if status_str not in PARSE_STATUS_VALUES:
+                status_str = ParseStatus.OK.value
 
             # If error/unreadable, return minimal question
-            if status_str in ['error', 'unreadable']:
+            if status_str in {ParseStatus.ERROR.value, ParseStatus.UNREADABLE.value}:
                 return Question(
-                    question_id=item.get('question_id'),
+                    question_id=item.get("question_id"),
                     status=ParseStatus(status_str),
-                    error_comment=item.get('error_comment'),
+                    error_comment=item.get("error_comment"),
                 )
 
             # Validate required fields for OK status
-            question_id = item.get('question_id')
+            question_id = item.get("question_id")
             if not question_id:
                 self.logger.warning("Missing question_id")
                 return None
 
-            question_text = item.get('question_text', '').strip()
+            question_text = item.get("question_text", "").strip()
             if not question_text:
                 return Question(
                     question_id=question_id,
@@ -331,28 +371,28 @@ class ExamMarker:
                     error_comment="Missing question_text",
                 )
 
-            # max_score: если отсутствует или не парсится → 0
-            max_score = item.get('max_score')
+            # max_score: if missing or invalid, default to 0
+            max_score = item.get("max_score")
             try:
                 max_score = int(max_score) if max_score else 0
             except (ValueError, TypeError):
                 max_score = 0
 
-            # canonical_answer: может быть пустой строкой
-            canonical_answer = item.get('canonical_answer', '')
+            # canonical_answer can be an empty string
+            canonical_answer = item.get("canonical_answer", "")
             if canonical_answer is None:
-                canonical_answer = ''
+                canonical_answer = ""
             canonical_answer = str(canonical_answer).strip()
 
             # Extract and validate question_type
-            q_type = item.get('question_type', 'text')
+            q_type = item.get("question_type", QuestionType.TEXT.value)
             try:
                 q_type = QuestionType(q_type)
             except ValueError:
                 q_type = QuestionType.TEXT
 
             # Extract and validate answer_type
-            answer_type = item.get('answer_type', 'text')
+            answer_type = item.get("answer_type", AnswerType.TEXT.value)
             try:
                 answer_type = AnswerType(answer_type)
             except ValueError:
@@ -376,33 +416,69 @@ class ExamMarker:
 # ==================== PIPELINE ORCHESTRATOR ====================
 
 class ExamPipeline:
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        agent_enabled: bool = True,
+        agent_max_steps: int = 6,
+        agent_config_path: Optional[Path] = None,
+    ):
         Config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         Config.ERRORS_DIR.mkdir(parents=True, exist_ok=True)
         Config.PAGES_DIR.mkdir(parents=True, exist_ok=True)
         
         self.logger = self._setup_logging()
         self.pdf_processor = PDFProcessor()
-        self.marker = ExamMarker()
+        agent_runtime: Optional[AgentRuntime] = None
+
+        if agent_enabled:
+            parser_model_url = self._resolve_parser_model_url()
+            try:
+                agent_runtime = AgentRuntime(
+                    model_url=parser_model_url,
+                    model_name=Config.MODEL_MARKER,
+                    api_key=Config.OPENAI_API_KEY,
+                    config_path=agent_config_path,
+                    max_steps=agent_max_steps,
+                    sandbox="docker",
+                    tools_profile="full",
+                    timeout_sec=Config.TIMEOUT,
+                )
+                self.logger.info(
+                    "Parser agent runtime initialized successfully "
+                    f"(model={Config.MODEL_MARKER}, sandbox=docker)"
+                )
+            except Exception as exc:
+                self.logger.error(f"Failed to initialize parser agent runtime: {exc}")
+                self.logger.error("Falling back to legacy direct OpenAI parser mode.")
+                agent_runtime = None
+
+        self.marker = ExamMarker(agent_runtime=agent_runtime)
+
+    def _resolve_parser_model_url(self) -> str:
+        base = (Config.OPENAI_BASE_URL or "").strip().rstrip("/")
+        if not base:
+            base = "https://api.openai.com/v1"
+        if base.endswith("/chat/completions"):
+            return base
+        return f"{base}/chat/completions"
 
     def _setup_logging(self) -> logging.Logger:
-            # Убеждаемся еще раз, что путь существует перед созданием Handler
-            log_file = Config.OUTPUT_DIR / 'pipeline.log'
-            
-            logger = logging.getLogger("ExamPipeline")
-            logger.setLevel(logging.INFO)
-            
-            # Чтобы не дублировать логи при перезапуске в Notebook
-            if not logger.handlers:
-                fh = logging.FileHandler(log_file)
-                sh = logging.StreamHandler()
-                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-                fh.setFormatter(formatter)
-                sh.setFormatter(formatter)
-                logger.addHandler(fh)
-                logger.addHandler(sh)
-                
-            return logger
+        log_file = Config.OUTPUT_DIR / "pipeline.log"
+
+        logger = logging.getLogger("ExamPipeline")
+        logger.setLevel(logging.INFO)
+
+        if not logger.handlers:
+            fh = logging.FileHandler(log_file)
+            sh = logging.StreamHandler()
+            formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            fh.setFormatter(formatter)
+            sh.setFormatter(formatter)
+            logger.addHandler(fh)
+            logger.addHandler(sh)
+
+        return logger
 
     def process_exam(self, 
                     pdf_path: str, 
@@ -468,7 +544,7 @@ class ExamPipeline:
                 ])
 
             # Save results (MODIFIED: Pass full page results, not flat questions)
-            self._save_results(exam_id, exam_output_dir, all_page_results)
+            self._save_results(exam_output_dir, all_page_results)
             self._save_error_report(exam_id, error_questions)
 
             # Generate summary
@@ -485,8 +561,7 @@ class ExamPipeline:
             self.logger.error(f"Critical error processing exam {exam_id}: {e}")
             return self._error_result(exam_id, str(e))
 
-    def _save_results(self, exam_id: str, output_dir: Path, 
-                     page_results: List[PageParseResult]):
+    def _save_results(self, output_dir: Path, page_results: List[PageParseResult]):
         """Save results to JSON files in the requested grouped format"""
         # Save questions.jsonl (MODIFIED STRUCTURE)
         questions_file = output_dir / "questions.jsonl"
@@ -549,7 +624,8 @@ class ExamPipeline:
     def _generate_exam_id(self, pdf_path: str) -> str:
         """Generate unique exam ID from PDF"""
         filename = Path(pdf_path).stem
-        file_hash = hashlib.md5(open(pdf_path, 'rb').read()).hexdigest()[:8]
+        with open(pdf_path, "rb") as pdf_file:
+            file_hash = hashlib.md5(pdf_file.read()).hexdigest()[:8]
         return f"{filename}_{file_hash}"
 
     def _error_result(self, exam_id: str, error_msg: str) -> Dict:
@@ -562,10 +638,66 @@ class ExamPipeline:
 
 # ==================== MAIN ====================
 
-def main():
-    pipeline = ExamPipeline()
+def _str_to_bool(value: str) -> bool:
+    normalized = (value or "").strip().lower()
+    if normalized in TRUTHY_VALUES:
+        return True
+    if normalized in FALSY_VALUES:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
-    exams_dir = Path("./exam_data/exams")
+
+def main():
+    parser = argparse.ArgumentParser(description="Exam parsing pipeline with optional smolagents runtime")
+    parser.add_argument(
+        "--agent-enabled",
+        type=_str_to_bool,
+        default=True,
+        help="Enable agent runtime for parsing (default: true)",
+    )
+    parser.add_argument(
+        "--agent-max-steps",
+        type=int,
+        default=6,
+        help="Maximum reasoning steps for parser agent (default: 6)",
+    )
+    parser.add_argument(
+        "--agent-config",
+        type=Path,
+        default=Path("scripts/agents/agent_config.yaml"),
+        help="Path to agent config YAML",
+    )
+    parser.add_argument(
+        "--model-marker",
+        type=str,
+        default=Config.MODEL_MARKER,
+        help="Model name used by parser (default: gpt-4.1-mini)",
+    )
+    parser.add_argument(
+        "--openai-base-url",
+        type=str,
+        default=Config.OPENAI_BASE_URL,
+        help="OpenAI-compatible base URL (default: OPENAI_BASE_URL env or https://api.openai.com/v1)",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=Config.OPENAI_API_KEY,
+        help="Optional API key override (default: OPENAI_API_KEY env)",
+    )
+    args = parser.parse_args()
+
+    Config.MODEL_MARKER = args.model_marker
+    Config.OPENAI_BASE_URL = args.openai_base_url
+    Config.OPENAI_API_KEY = args.api_key
+
+    pipeline = ExamPipeline(
+        agent_enabled=args.agent_enabled,
+        agent_max_steps=args.agent_max_steps,
+        agent_config_path=args.agent_config,
+    )
+
+    exams_dir = Config.EXAMS_DIR
     results = []
 
     if not exams_dir.exists():

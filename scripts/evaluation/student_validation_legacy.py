@@ -3,25 +3,13 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
-import sys
-import os
+from typing import Any, Dict, List, Optional
 
 import requests
 from requests import Response
 from tqdm import tqdm
 
-# Ensure repository root is importable when script is run as a file.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from scripts.agents import AgentRuntime, AgentRuntimeError
-from scripts.agents.models import ensure_chat_completions_url
-
 STATUS_OK = "ok"
-TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
-FALSY_VALUES = {"0", "false", "no", "n", "off"}
 
 
 class StudentCallError(Exception):
@@ -161,72 +149,13 @@ def _sanitize_error(error: Exception, limit: int = 240) -> str:
     return message
 
 
-def _build_request_headers(api_key: Optional[str]) -> Dict[str, str]:
-    resolved_api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("AITUNNEL_API_KEY")
-    header_name = (os.getenv("OPENAI_API_KEY_HEADER") or "Authorization").strip() or "Authorization"
-    header_prefix = (os.getenv("OPENAI_API_KEY_PREFIX") or "Bearer").strip()
-
-    headers = {"Content-Type": "application/json"}
-    if resolved_api_key:
-        token_value = f"{header_prefix} {resolved_api_key}".strip() if header_prefix else resolved_api_key
-        headers[header_name] = token_value
-    return headers
-
-
-def _extract_response_text(data: Dict[str, Any]) -> Optional[str]:
-    if "message" in data and "content" in data["message"]:
-        return data["message"]["content"].strip()
-    if "choices" in data and data["choices"]:
-        return data["choices"][0]["message"]["content"].strip()
-    if "response" in data:
-        return data["response"].strip()
-    return None
-
-
-def _extract_jsonl_response_text(content: str) -> str:
-    full_response = ""
-    for line in content.splitlines():
-        if not line.strip():
-            continue
-        try:
-            chunk = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        if "message" in chunk and "content" in chunk["message"]:
-            full_response += chunk["message"]["content"]
-        elif "response" in chunk:
-            full_response += chunk["response"]
-    return full_response.strip()
-
-
-def _wait_or_raise_retry(
-    *,
-    attempt: int,
-    max_retries: int,
-    status: str,
-    retryable_statuses: Set[str],
-    error: StudentCallError,
-) -> None:
-    if attempt == max_retries - 1 or status not in retryable_statuses:
-        raise error
-
-    wait_time = 2**attempt
-    tqdm.write(
-        f"Attempt {attempt + 1}/{max_retries} failed with status={status}: "
-        f"{error.message}. Retrying in {wait_time}s..."
-    )
-    time.sleep(wait_time)
-
-
-def call_chemllm_legacy(
+def call_chemllm(
     prompt: str,
     model_url: str,
     model_name: str,
     max_tokens: int,
     temperature: float,
     timeout: int,
-    api_key: Optional[str] = None,
     max_retries: int = 3,
 ) -> str:
     payload = {
@@ -243,7 +172,7 @@ def call_chemllm_legacy(
         try:
             response = requests.post(
                 model_url,
-                headers=_build_request_headers(api_key),
+                headers={"Content-Type": "application/json"},
                 json=payload,
                 timeout=timeout,
             )
@@ -254,14 +183,29 @@ def call_chemllm_legacy(
             except json.JSONDecodeError as exc:
                 content = response.text.strip()
                 if content:
-                    full_response = _extract_jsonl_response_text(content)
+                    lines = content.split("\n")
+                    full_response = ""
+                    for line in lines:
+                        if not line.strip():
+                            continue
+                        try:
+                            chunk = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if "message" in chunk and "content" in chunk["message"]:
+                            full_response += chunk["message"]["content"]
+                        elif "response" in chunk:
+                            full_response += chunk["response"]
                     if full_response:
-                        return full_response
+                        return full_response.strip()
                 raise StudentCallError("parse_error", f"Failed to parse response as JSON: {exc}")
 
-            response_text = _extract_response_text(data)
-            if response_text is not None:
-                return response_text
+            if "message" in data and "content" in data["message"]:
+                return data["message"]["content"].strip()
+            if "choices" in data and data["choices"]:
+                return data["choices"][0]["message"]["content"].strip()
+            if "response" in data:
+                return data["response"].strip()
 
             raise StudentCallError("parse_error", "Unexpected response format")
 
@@ -284,51 +228,17 @@ def call_chemllm_legacy(
             status = "parse_error"
             final_error = StudentCallError(status, _sanitize_error(exc))
 
-        _wait_or_raise_retry(
-            attempt=attempt,
-            max_retries=max_retries,
-            status=status,
-            retryable_statuses=retryable_statuses,
-            error=final_error,
+        if attempt == max_retries - 1 or status not in retryable_statuses:
+            raise final_error
+
+        wait_time = 2**attempt
+        tqdm.write(
+            f"Attempt {attempt + 1}/{max_retries} failed with status={status}: "
+            f"{final_error.message}. Retrying in {wait_time}s..."
         )
+        time.sleep(wait_time)
 
     raise StudentCallError("parse_error", "Unreachable retry state")
-
-
-def call_agent(
-    runtime: AgentRuntime,
-    question: Dict[str, Any],
-    max_retries: int = 3,
-) -> str:
-    retryable_statuses = {
-        "timeout",
-        "http_error",
-        "connection_error",
-        "parse_error",
-        "agent_step_error",
-    }
-
-    final_error = StudentCallError("parse_error", "Unknown runtime error")
-
-    for attempt in range(max_retries):
-        try:
-            return runtime.solve_question(question)
-        except AgentRuntimeError as exc:
-            status = exc.status or "parse_error"
-            final_error = StudentCallError(status, _sanitize_error(exc))
-        except Exception as exc:
-            status = "parse_error"
-            final_error = StudentCallError(status, _sanitize_error(exc))
-
-        _wait_or_raise_retry(
-            attempt=attempt,
-            max_retries=max_retries,
-            status=status,
-            retryable_statuses=retryable_statuses,
-            error=final_error,
-        )
-
-    raise final_error
 
 
 def run_benchmark_inference(
@@ -343,13 +253,6 @@ def run_benchmark_inference(
     max_error_len: int = 240,
     limit: Optional[int] = None,
     workers: int = 1,
-    *,
-    agent_enabled: bool = True,
-    agent_max_steps: int = 6,
-    agent_sandbox: str = "docker",
-    agent_tools_profile: str = "full",
-    agent_config: Optional[Path] = Path("scripts/agents/agent_config.yaml"),
-    api_key: Optional[str] = None,
 ):
     questions = load_benchmark_questions(benchmark_path=benchmark_path)
     if limit is not None and limit >= 0:
@@ -359,23 +262,6 @@ def run_benchmark_inference(
             f"workers={workers} requested; running in sequential mode in this script version."
         )
 
-    runtime: Optional[AgentRuntime] = None
-    if agent_enabled:
-        try:
-            runtime = AgentRuntime(
-                model_url=model_url,
-                model_name=model_name,
-                benchmark_path=benchmark_path,
-                api_key=api_key,
-                config_path=agent_config,
-                max_steps=agent_max_steps,
-                sandbox=agent_sandbox,
-                tools_profile=agent_tools_profile,
-                timeout_sec=timeout,
-            )
-        except Exception as exc:
-            raise RuntimeError(f"Failed to initialize agent runtime: {exc}") from exc
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_path.open("w", encoding="utf-8") as f_out:
@@ -383,31 +269,23 @@ def run_benchmark_inference(
             tqdm(questions, total=len(questions), desc="Validating student answers"),
             start=1,
         ):
+            prompt = build_prompt(question)
+
             started_at = time.perf_counter()
             student_status = STATUS_OK
             student_error = ""
             student_answer = ""
 
             try:
-                if runtime is not None:
-                    raw_answer = call_agent(
-                        runtime=runtime,
-                        question=question,
-                        max_retries=max_retries,
-                    )
-                else:
-                    prompt = build_prompt(question)
-                    raw_answer = call_chemllm_legacy(
-                        prompt,
-                        model_url=model_url,
-                        model_name=model_name,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        timeout=timeout,
-                        api_key=api_key,
-                        max_retries=max_retries,
-                    )
-
+                raw_answer = call_chemllm(
+                    prompt,
+                    model_url=model_url,
+                    model_name=model_name,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    timeout=timeout,
+                    max_retries=max_retries,
+                )
                 student_answer = normalize_student_answer(
                     question.get("answer_type", ""),
                     raw_answer,
@@ -444,26 +322,9 @@ def run_benchmark_inference(
             f_out.write(json.dumps(result, ensure_ascii=False) + "\n")
 
 
-def _str_to_bool(value: str) -> bool:
-    normalized = (value or "").strip().lower()
-    if normalized in TRUTHY_VALUES:
-        return True
-    if normalized in FALSY_VALUES:
-        return False
-    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
-
-
-def _resolve_model_url(model_url: Optional[str], api_base_url: Optional[str]) -> str:
-    if model_url:
-        return ensure_chat_completions_url(model_url)
-    if api_base_url:
-        return ensure_chat_completions_url(api_base_url)
-    raise argparse.ArgumentTypeError("Either --model-url or --api-base-url must be provided")
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Benchmark student answers using an agentic runtime (smolagents) or legacy HTTP mode"
+        description="Benchmark student answers using a remote LLM model"
     )
     parser.add_argument(
         "--benchmark-path",
@@ -480,26 +341,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model-url",
         type=str,
-        default=None,
-        help="Model API endpoint URL (OpenAI-compatible chat completion endpoint preferred)",
-    )
-    parser.add_argument(
-        "--api-base-url",
-        type=str,
-        default=None,
-        help="OpenAI-compatible API base URL (alternative to --model-url)",
+        required=True,
+        help="URL of the model API endpoint",
     )
     parser.add_argument(
         "--model-name",
         type=str,
         required=True,
         help="Name of the model to use",
-    )
-    parser.add_argument(
-        "--api-key",
-        type=str,
-        default=None,
-        help="Optional API key override for agent runtime",
     )
     parser.add_argument(
         "--max-tokens",
@@ -544,50 +393,13 @@ if __name__ == "__main__":
         help="Reserved for parallel execution tuning (default: 1)",
     )
 
-    parser.add_argument(
-        "--agent-enabled",
-        type=_str_to_bool,
-        default=True,
-        help="Enable smolagents runtime (default: true)",
-    )
-    parser.add_argument(
-        "--agent-max-steps",
-        type=int,
-        default=6,
-        help="Maximum reasoning steps for agent runtime (default: 6)",
-    )
-    parser.add_argument(
-        "--agent-sandbox",
-        type=str,
-        default="docker",
-        help="Agent executor type (default: docker)",
-    )
-    parser.add_argument(
-        "--agent-tools-profile",
-        type=str,
-        default="full",
-        help="Tools profile from config (default: full)",
-    )
-    parser.add_argument(
-        "--agent-config",
-        type=Path,
-        default=Path("scripts/agents/agent_config.yaml"),
-        help="Path to agent YAML config (default: scripts/agents/agent_config.yaml)",
-    )
-
     args = parser.parse_args()
-
-    try:
-        resolved_model_url = _resolve_model_url(args.model_url, args.api_base_url)
-    except argparse.ArgumentTypeError as exc:
-        parser.error(str(exc))
 
     run_benchmark_inference(
         benchmark_path=args.benchmark_path,
         output_path=args.output_path,
-        model_url=resolved_model_url,
+        model_url=args.model_url,
         model_name=args.model_name,
-        api_key=args.api_key,
         max_tokens=args.max_tokens,
         temperature=args.temperature,
         timeout=args.timeout,
@@ -595,9 +407,4 @@ if __name__ == "__main__":
         max_error_len=args.max_error_len,
         limit=args.limit,
         workers=args.workers,
-        agent_enabled=args.agent_enabled,
-        agent_max_steps=args.agent_max_steps,
-        agent_sandbox=args.agent_sandbox,
-        agent_tools_profile=args.agent_tools_profile,
-        agent_config=args.agent_config,
     )

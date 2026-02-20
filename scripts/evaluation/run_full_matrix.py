@@ -7,8 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from llm_judge import run_llm_judge
 from student_validation import run_benchmark_inference
+
+TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 
 
 def sanitize_model_name(model_name: str) -> str:
@@ -33,6 +34,61 @@ def write_json(path: Path, payload: Any) -> None:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
+def _status(row: Dict[str, Any], key: str) -> str:
+    return str(row.get(key, "ok") or "ok")
+
+
+def _is_truthy(value: Any) -> bool:
+    return str(value).strip().lower() in TRUTHY_VALUES
+
+
+def _resolve_model_url(model_url: Optional[str], api_base_url: Optional[str]) -> str:
+    base = (model_url or api_base_url or "").strip()
+    if not base:
+        raise ValueError("Either --model-url or --api-base-url must be provided")
+    normalized = base.rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return normalized
+    return f"{normalized}/chat/completions"
+
+
+def _build_skipped_row(model_name: str) -> Dict[str, Any]:
+    return {
+        "model_name": model_name,
+        "total_rows": 0,
+        "quality_total_score": 0.0,
+        "quality_max_score": 0.0,
+        "quality_normalized_score": None,
+        "reliability_ok_count": 0,
+        "reliability_ok_rate": None,
+        "infra_error_count": {},
+        "infra_error_rate": {},
+        "skipped": True,
+    }
+
+
+def _build_summary_row(
+    *,
+    model_name: str,
+    metrics: Dict[str, Any],
+    judge_model: str,
+    metrics_path: Path,
+) -> Dict[str, Any]:
+    return {
+        "model_name": model_name,
+        "total_rows": metrics.get("total_rows"),
+        "quality_total_score": metrics.get("quality_total_score"),
+        "quality_max_score": metrics.get("quality_max_score"),
+        "quality_normalized_score": metrics.get("quality_normalized_score"),
+        "reliability_ok_count": metrics.get("reliability_ok_count"),
+        "reliability_ok_rate": metrics.get("reliability_ok_rate"),
+        "infra_error_count": metrics.get("infra_error_count"),
+        "infra_error_rate": metrics.get("infra_error_rate"),
+        "judge_model": judge_model,
+        "metrics_path": str(metrics_path),
+    }
+
+
 def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     total_rows = len(judge_rows)
 
@@ -54,8 +110,8 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     infra_counts: Counter = Counter()
 
     for row in judge_rows:
-        student_status = str(row.get("student_status", "ok") or "ok")
-        row_status = str(row.get("row_status", "ok") or "ok")
+        student_status = _status(row, "student_status")
+        row_status = _status(row, "row_status")
         if student_status == "ok" and row_status == "ok":
             reliability_ok_count += 1
             continue
@@ -85,8 +141,8 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         bucket = breakdown[answer_type]
         bucket["count"] += 1
 
-        student_status = str(row.get("student_status", "ok") or "ok")
-        row_status = str(row.get("row_status", "ok") or "ok")
+        student_status = _status(row, "student_status")
+        row_status = _status(row, "row_status")
         if student_status == "ok" and row_status == "ok":
             bucket["ok_count"] += 1
 
@@ -116,7 +172,7 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     errors_sample: List[Dict[str, Any]] = []
     for row in judge_rows:
-        student_status = str(row.get("student_status", "ok") or "ok")
+        student_status = _status(row, "student_status")
         if student_status == "ok":
             continue
         errors_sample.append(
@@ -196,12 +252,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model-url",
         type=str,
-        required=True,
-        help="Student model API endpoint URL",
+        default=None,
+        help="Student model API endpoint URL (chat completions endpoint)",
+    )
+    parser.add_argument(
+        "--api-base-url",
+        type=str,
+        default=None,
+        help="OpenAI-compatible API base URL (alternative to --model-url)",
     )
     parser.add_argument(
         "--student-models",
+        "--models",
         nargs="+",
+        dest="student_models",
         required=True,
         help="One or more student model names",
     )
@@ -277,11 +341,57 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="How many technical error examples to save (default: 10)",
     )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="Optional API key override for student runtime",
+    )
+    parser.add_argument(
+        "--agent-enabled",
+        type=str,
+        default="true",
+        help="Enable smolagents runtime for student inference (true/false, default: true)",
+    )
+    parser.add_argument(
+        "--agent-max-steps",
+        type=int,
+        default=6,
+        help="Maximum reasoning steps for agent runtime (default: 6)",
+    )
+    parser.add_argument(
+        "--agent-sandbox",
+        type=str,
+        default="docker",
+        help="Agent executor type (default: docker)",
+    )
+    parser.add_argument(
+        "--agent-tools-profile",
+        type=str,
+        default="full",
+        help="Tools profile from agent config (default: full)",
+    )
+    parser.add_argument(
+        "--agent-config",
+        type=Path,
+        default=Path("scripts/agents/agent_config.yaml"),
+        help="Path to agent config YAML",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    try:
+        from llm_judge import run_llm_judge
+    except ImportError as exc:
+        raise SystemExit(
+            "[ERROR] Missing dependency for judge stage. Install with: pip install openai"
+        ) from exc
+    try:
+        model_url = _resolve_model_url(args.model_url, args.api_base_url)
+    except ValueError as exc:
+        raise SystemExit(f"[ERROR] {exc}") from exc
 
     run_dir = args.output_root / args.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -300,17 +410,24 @@ def main() -> None:
         errors_sample_path = model_dir / "errors_sample.json"
 
         print(f"[INFO] Running student inference for model={model_name}")
+        agent_enabled = _is_truthy(args.agent_enabled)
         run_benchmark_inference(
             benchmark_path=args.benchmark_path,
             output_path=student_output_path,
-            model_url=args.model_url,
+            model_url=model_url,
             model_name=model_name,
+            api_key=args.api_key,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
             timeout=args.timeout,
             max_retries=args.max_retries,
             limit=args.limit,
             workers=args.workers,
+            agent_enabled=agent_enabled,
+            agent_max_steps=args.agent_max_steps,
+            agent_sandbox=args.agent_sandbox,
+            agent_tools_profile=args.agent_tools_profile,
+            agent_config=args.agent_config,
         )
 
         student_rows = read_jsonl(student_output_path)
@@ -319,18 +436,7 @@ def main() -> None:
                 f"[WARN] No rows were produced for model={model_name}. "
                 "Skipping judging and metrics."
             )
-            skipped_row = {
-                "model_name": model_name,
-                "total_rows": 0,
-                "quality_total_score": 0.0,
-                "quality_max_score": 0.0,
-                "quality_normalized_score": None,
-                "reliability_ok_count": 0,
-                "reliability_ok_rate": None,
-                "infra_error_count": {},
-                "infra_error_rate": {},
-                "skipped": True,
-            }
+            skipped_row = _build_skipped_row(model_name)
             write_json(metrics_path, skipped_row)
             write_json(breakdown_path, {})
             write_json(errors_sample_path, [])
@@ -377,19 +483,12 @@ def main() -> None:
         )
 
         summary_rows.append(
-            {
-                "model_name": model_name,
-                "total_rows": metrics.get("total_rows"),
-                "quality_total_score": metrics.get("quality_total_score"),
-                "quality_max_score": metrics.get("quality_max_score"),
-                "quality_normalized_score": metrics.get("quality_normalized_score"),
-                "reliability_ok_count": metrics.get("reliability_ok_count"),
-                "reliability_ok_rate": metrics.get("reliability_ok_rate"),
-                "infra_error_count": metrics.get("infra_error_count"),
-                "infra_error_rate": metrics.get("infra_error_rate"),
-                "judge_model": args.judge_model,
-                "metrics_path": str(metrics_path),
-            }
+            _build_summary_row(
+                model_name=model_name,
+                metrics=metrics,
+                judge_model=args.judge_model,
+                metrics_path=metrics_path,
+            )
         )
 
     summary_json_path = run_dir / "summary.json"

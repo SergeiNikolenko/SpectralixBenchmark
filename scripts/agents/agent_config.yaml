@@ -1,0 +1,67 @@
+model:
+  temperature: 0.2
+  max_tokens: 768
+  requests_per_minute: 0
+
+runtime:
+  add_base_tools: true
+  additional_authorized_imports:
+    - math
+    - statistics
+    - json
+    - re
+    - collections
+    - itertools
+    - pathlib
+    - typing
+
+security:
+  allowed_tool_hosts:
+    - 127.0.0.1
+    - localhost
+    - api.openai.com
+    - openrouter.ai
+    - api.together.xyz
+  allow_shell_tools: false
+  allow_file_write_tools: false
+
+sandbox:
+  executor_type: docker
+  docker:
+    image_name: spectralix-smolagent-sandbox
+    build_new_image: true
+    docker_host: null
+    docker_port: null
+    container_run_kwargs:
+      read_only: true
+      user: "65534:65534"
+      mem_limit: "768m"
+      nano_cpus: 1000000000
+      pids_limit: 128
+      cap_drop:
+        - ALL
+      security_opt:
+        - no-new-privileges
+      tmpfs:
+        /tmp: rw,noexec,nosuid,size=128m
+
+tools:
+  profiles:
+    minimal:
+      - benchmark_lookup_tool
+      - chem_format_tool
+      - smiles_sanity_tool
+      - unit_convert_tool
+      - rubric_hint_tool
+      - json_array_validate_tool
+    full:
+      - benchmark_lookup_tool
+      - chem_format_tool
+      - smiles_sanity_tool
+      - unit_convert_tool
+      - rubric_hint_tool
+      - json_array_validate_tool
+      - safe_http_get_tool
+  mcp:
+    enabled: false
+    servers: []

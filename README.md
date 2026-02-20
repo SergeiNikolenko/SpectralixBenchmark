@@ -1,184 +1,137 @@
-# AI Assistant Benchmark for Organic Chemistry & Mass Spectrometry (MS2)
+# SpectralixBenchmark
 
-**Innopolis University — Artificial Intelligence Laboratory in Chemistry**
+Benchmark and evaluation tooling for chemistry-focused AI systems:
 
----
+- Organic chemistry tasks
+- Tandem mass spectrometry (MS2) tasks
+- Structured answer evaluation with deterministic + LLM judging
 
-## 📘 Project Overview
+## Benchmark Schema
 
-This repository contains the official benchmark dataset, documentation, and evaluation tools for a specialized AI assistant focused on:
+Primary dataset: `benchmark/benchmark_v1_0.jsonl`
 
-- **Organic Chemistry**  
-- **Tandem Mass Spectrometry (MS2)**  
-- **Chemical Reaction Product Structure Analysis**  
-
-This benchmark is designed to rigorously evaluate AI model performance using real academic tests sourced from:
-
-- Top global universities  
-- Undergraduate + graduate chemistry exams  
-- Olympiads  
-- Specialized MS2 interpretation exercises  
-- Official textbook problem sets  
-
-The benchmark supports fine-grained assessment of reasoning, interpretation, and domain-specific problem-solving in chemistry and mass spectrometry.
-
-This project accompanies the “AI Assistant for Organic Chemistry and Mass Spectrometry” project, whose goal is to:
-> Develop a digital AI assistant to optimize MS2 data interpretation and improve the accuracy of molecular structure predictions for reaction products.
-
----
-
-## 🧪 Benchmark Structure
-
-Each entry in the benchmark follows the unified schema:
+Each row follows this schema:
 
 ```json
 {
   "exam_id": "string",
-  "page_id": "string",
-  "question_id": "string",
-  "question_type": "text | multimodal | ...",
+  "page_id": "integer | string",
+  "question_id": "integer | string",
+  "question_type": "string",
   "question_text": "string",
-  "answer_type": "single_choice | multiple_choice | ordering | numeric | text | structure | full_synthesis | reaction_description | property_determination | msms_structure_prediction",
-  "max_score": "number",
-  "canonical_answer": "string"
+  "answer_type": "single_choice | multiple_choice | numeric | ordering | structure | full_synthesis | reaction_description | property_determination | msms_structure_prediction | text",
+  "canonical_answer": "string",
+  "max_score": "integer"
 }
-
 ```
 
-**Supported answer types (answer_type):**
+## Runtime Architecture
 
-- `single_choice` — Single answer choice
-- `multiple_choice` — Multiple answer choices
-- `numeric` — Numeric answer
-- `text` — Text answer
-- `ordering` — Ordering/ranking
-- `structure` — Structure determination
-- `full_synthesis` — Full synthesis
-- `reaction_description` — Reaction description
-- `property_determination` — Property determination
-- `msms_structure_prediction` — MS/MS spectra interpretation
+Student-stage inference supports two backends:
 
-## 📁 Repository Structure
+1. Agent runtime (default): `smolagents` with Docker sandbox and allowlisted tools
+2. Legacy baseline: direct OpenAI-compatible HTTP calls
+
+Core runtime modules:
+
+- `scripts/agents/runtime.py`
+- `scripts/agents/config.py`
+- `scripts/agents/models.py`
+- `scripts/agents/tool_registry.py`
+- `scripts/agents/prompts.py`
+
+Security and operational controls:
+
+- `scripts/agents/agent_config.yaml`
+- `docs/security_runbook.md`
+- `docs/architecture.md`
+
+## Quick Start (Local Proxy)
+
+Repository root:
 
 ```bash
-SpectralixBenchmark/
-│
-├── README.md
-│
-├── benchmark/ # Final benchmark dataset or its parts
-│
-├── data/
-│   ├── mass_spec/ # Mass spectrometry data
-│   └── organic/ # Organic chemistry data
-│
-├── scripts/
-│   ├── parsing/
-│   │   ├── exam_data/
-│   │   │   ├── exams/ # Exam PDFs that passed the parser
-│   │   │   ├── full_exams/ # Full list of exam PDFs
-│   │   │   ├── output/ # Parsed exams
-│   │   │   └── pages/ # Exam *png pages
-│   │   ├── iterations/
-│   │   ├── benchmark_collection.py
-│   │   ├── exam-parser-pipeline.py
-│   │   ├── requirements.txt
-│   │   └── README.md
-│   ├── evaluation/ # Evaluation scripts
-│
-└── evaluation/
-    ├── baseline_results/
-    │   └── README.md
-    └── rag_results/
-        └── README.md
+cd /Users/nikolenko/.codex/worktrees/e20d/SpectralixBenchmark
 ```
-## 🤝 How to Contribute
 
-We welcome contributions from:
-
-- Chemists  
-- Mass spectrometry experts  
-- ML researchers  
-- Students and engineers  
-
-### 1. Add new exam sources
-
-Place PDFs or links into:
+Install dependencies:
 
 ```bash
-data/raw/organic/
-data/raw/mass_spec/
+pip install -r scripts/parsing/requirements.txt
+pip install requests tqdm openai "smolagents[docker]" PyYAML
 ```
 
-### 2. Add new benchmark questions
+Verify local proxy (example setup):
 
-Create JSONL entries following the official schema:
+- API base URL: `http://127.0.0.1:8317/v1`
+- API key: `ccs-internal-managed`
 
 ```bash
-benchmark/<dataset_name>.jsonl
+curl -sS \
+  -H "Authorization: Bearer ccs-internal-managed" \
+  "http://127.0.0.1:8317/v1/models"
 ```
 
-Each entry must include:
+Run student inference on 5 questions:
 
-- Clean question text  
-- University + year + page  
-- Canonical answer  
-- `rubric`, `topic_tags`, `difficulty` are planned for `vNext` and are not mandatory in `v1.0`  
-
-### 3. Add new RAG materials
-
-Add textbooks, glossaries, lecture notes into:
 ```bash
-data/rag_corpus/
+python3 scripts/evaluation/student_validation.py \
+  --benchmark-path benchmark/benchmark_v1_0.jsonl \
+  --output-path scripts/evaluation/student_output.jsonl \
+  --api-base-url "http://127.0.0.1:8317/v1" \
+  --model-name "gpt-5.3-codex-spark" \
+  --api-key "ccs-internal-managed" \
+  --limit 5
 ```
 
-### 4. Propose improvements
+Run judge:
 
-Open issues for:
+```bash
+python3 scripts/evaluation/llm_judge.py \
+  --input-path scripts/evaluation/student_output.jsonl \
+  --gold-path benchmark/benchmark_v1_0.jsonl \
+  --judge-model "gpt-5.3-codex-spark" \
+  --output-path scripts/evaluation/llm_judge_output.jsonl
+```
 
-- Schema changes  
-- Evaluation methodology  
-- Partial credit policy  
-- New chemistry domains  
-- MS2 spectrum datasets  
+Run full matrix:
 
----
+```bash
+python3 scripts/evaluation/run_full_matrix.py \
+  --benchmark-path benchmark/benchmark_v1_0.jsonl \
+  --api-base-url "http://127.0.0.1:8317/v1" \
+  --api-key "ccs-internal-managed" \
+  --models gpt-5.3-codex-spark \
+  --judge-model gpt-5.3-codex-spark \
+  --agent-enabled true \
+  --agent-max-steps 6 \
+  --agent-sandbox docker \
+  --agent-tools-profile full
+```
 
-## 🔬 Project Focus Areas
+## Parsing Pipeline
 
-### Organic Chemistry
+Parse source PDFs and produce per-exam artifacts:
 
-- Reaction mechanisms  
-- Stereochemistry  
-- Functional group transformations  
-- Reagents, conditions, selectivity  
-- Structure–property relationships  
+```bash
+python3 scripts/parsing/exam-parser-pipeline.py \
+  --agent-enabled true \
+  --agent-max-steps 6 \
+  --agent-config scripts/agents/agent_config.yaml \
+  --openai-base-url "http://127.0.0.1:8317/v1" \
+  --api-key "ccs-internal-managed"
+```
 
-### Mass Spectrometry (MS2)
+Collect flattened benchmark rows from parser output:
 
-- Ionization methods  
-- Analyzers  
-- Fragmentation patterns  
-- Spectrum interpretation  
-- Reaction product identification  
-- Quantitative analysis  
+```bash
+python3 scripts/parsing/benchmark_collection.py
+```
 
----
-
-## ✨ Project Goals
-
-- Build a high-quality academic benchmark for chemistry and MS2.  
-- Enable evaluation of LLM reasoning in chemical sciences.  
-- Support the development of a digital AI assistant integrated with MS2 pipelines.  
-- Provide a reliable dataset for researchers, students, and industry practitioners.  
-
----
-
-## 📬 Contacts
+## Contacts
 
 Maintainer (Innopolis University — AI Lab in Chemistry):
 
-**Ivan Golov**  
-**Email:** i.golov@innopolis.university  
-**Telegram:** [https://t.me/Ione_Golov](https://t.me/Ione_Golov)  
-
-If you’re interested in contributing, collaborating, or integrating the benchmark — feel free to reach out.
+- Ivan Golov
+- Email: `i.golov@innopolis.university`
+- Telegram: [https://t.me/Ione_Golov](https://t.me/Ione_Golov)
