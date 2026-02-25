@@ -50,6 +50,7 @@ class Config:
     OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
     MODEL_MARKER = "gpt-4.1-mini"
     MAX_TOKENS_MARKER = 3000
+    REASONING_EFFORT = "high"
     
     BASE_DIR = Path("./exam_data")
     EXAMS_DIR = BASE_DIR / "exams"
@@ -289,6 +290,7 @@ class ExamMarker:
                     ],
                 }
                 payload[token_param] = Config.MAX_TOKENS_MARKER
+                payload["reasoning_effort"] = Config.REASONING_EFFORT
 
                 response = self.client.chat.completions.create(**payload)
                 response_text = response.choices[0].message.content
@@ -372,6 +374,7 @@ class ExamMarker:
                 model_url=Config.OPENAI_BASE_URL,
                 api_key=Config.OPENAI_API_KEY,
                 retries=self.structured_retries,
+                reasoning_effort=Config.REASONING_EFFORT,
             )
             self.logger.info(
                 f"PydanticAI parser repair succeeded for exam={exam_id}, page={page_id}, items={len(repaired)}"

@@ -16,6 +16,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
         "temperature": 0.2,
         "max_tokens": 768,
         "requests_per_minute": 0,
+        "reasoning_effort": "high",
     },
     "runtime": {
         "add_base_tools": True,
@@ -107,6 +108,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
 REQUIRED_CONFIG_SECTIONS = ("model", "runtime", "security", "sandbox", "tools", "pydantic_guard")
 SUPPORTED_EXECUTORS = {"local", "blaxel", "e2b", "modal", "docker", "wasm"}
 SUPPORTED_STUDENT_GUARD_MODES = {"on_failure", "always", "off"}
+SUPPORTED_REASONING_EFFORTS = {"low", "medium", "high"}
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
@@ -164,6 +166,14 @@ def _validate_profiles(tools_section: Dict[str, Any]) -> None:
 def validate_agent_config(config: Dict[str, Any]) -> Dict[str, Any]:
     for section in REQUIRED_CONFIG_SECTIONS:
         _require_mapping(config, section)
+
+    model_cfg = _require_mapping(config, "model")
+    reasoning_effort = str(model_cfg.get("reasoning_effort") or "").strip().lower()
+    if reasoning_effort and reasoning_effort not in SUPPORTED_REASONING_EFFORTS:
+        raise ValueError(
+            "Agent config model.reasoning_effort must be one of "
+            f"{sorted(SUPPORTED_REASONING_EFFORTS)}"
+        )
 
     sandbox = _require_mapping(config, "sandbox")
     executor_type = str(sandbox.get("executor_type") or "").strip().lower()

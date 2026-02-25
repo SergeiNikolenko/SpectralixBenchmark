@@ -26,6 +26,7 @@ def run_structured_judge(
     retries: int,
     temperature: float,
     max_tokens: int,
+    reasoning_effort: str = "high",
 ) -> Dict[str, Any]:
     model = build_openai_chat_model(
         model_name=model_name,
@@ -46,6 +47,7 @@ def run_structured_judge(
             model_settings={
                 "temperature": float(temperature),
                 "max_tokens": int(max_tokens),
+                "reasoning_effort": str(reasoning_effort or "high"),
             },
         )
         output = result.output

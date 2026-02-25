@@ -64,6 +64,7 @@ def run_student_guard(
     model_url: Optional[str],
     api_key: Optional[str],
     retries: int,
+    reasoning_effort: str = "high",
 ) -> StudentGuardOutput:
     model = build_openai_chat_model(
         model_name=model_name,
@@ -89,6 +90,7 @@ def run_student_guard(
             model_settings={
                 "temperature": 0.0,
                 "max_tokens": 256,
+                "reasoning_effort": str(reasoning_effort or "high"),
             },
         )
         output = result.output

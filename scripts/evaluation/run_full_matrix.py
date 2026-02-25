@@ -279,8 +279,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--judge-model",
         type=str,
-        default="gpt-4o-mini",
-        help="Fixed judge model for non-deterministic answer types (default: gpt-4o-mini)",
+        default="gpt-5.2-codex",
+        help="Fixed judge model for non-deterministic answer types (default: gpt-5.2-codex)",
     )
     parser.add_argument(
         "--output-root",
@@ -341,6 +341,13 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Judge temperature (default: 0.0)",
+    )
+    parser.add_argument(
+        "--judge-reasoning-effort",
+        type=str,
+        default="high",
+        choices=["low", "medium", "high"],
+        help="Judge reasoning effort for LLM calls (default: high)",
     )
     parser.add_argument(
         "--error-sample-size",
@@ -530,6 +537,7 @@ def main() -> None:
             model_name=args.judge_model,
             max_tokens=args.judge_max_tokens,
             temperature=args.judge_temperature,
+            reasoning_effort=args.judge_reasoning_effort,
             judge_structured_enabled=_is_truthy(args.judge_structured_enabled),
             judge_structured_retries=args.judge_structured_retries,
             judge_structured_fallback_legacy=_is_truthy(args.judge_structured_fallback_legacy),

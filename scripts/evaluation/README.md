@@ -78,6 +78,7 @@ Student guard flags:
 - `--student-guard-enabled` (default: `true`)
 - `--student-guard-mode` (`on_failure|always|off`, default: `on_failure`)
 - `--student-guard-retries` (default: `2`)
+- `--student-guard-reasoning-effort` (`low|medium|high`, default: `high`)
 
 Trace flags:
 
@@ -103,6 +104,7 @@ uv run python scripts/evaluation/student_validation.py \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
+  --student-guard-reasoning-effort high \
   --trace-log-enabled true \
   --trace-log-dir runs/debug_traces \
   --limit 5
@@ -115,12 +117,14 @@ Judge structured flags:
 - `--judge-structured-enabled` (default: `true`)
 - `--judge-structured-retries` (default: `2`)
 - `--judge-structured-fallback-legacy` (default: `true`)
+- `--reasoning-effort` (`low|medium|high`, default: `high`)
 
 ```bash
 uv run python scripts/evaluation/llm_judge.py \
   --input-path scripts/evaluation/student_output.jsonl \
   --gold-path benchmark/benchmark_v1_0.jsonl \
   --judge-model "gpt-5.3-codex-spark" \
+  --reasoning-effort high \
   --judge-model-url "http://127.0.0.1:8317/v1" \
   --judge-api-key "ccs-internal-managed" \
   --judge-structured-enabled true \
@@ -145,6 +149,7 @@ uv run python scripts/evaluation/run_full_matrix.py \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
+  --judge-reasoning-effort high \
   --trace-log-enabled true \
   --trace-log-dir runs/debug_traces \
   --judge-structured-enabled true \

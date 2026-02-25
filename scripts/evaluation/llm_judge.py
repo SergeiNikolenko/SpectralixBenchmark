@@ -283,12 +283,20 @@ def _resolve_judge_api_base(model_url: Optional[str]) -> Optional[str]:
     return api_base
 
 
-def call_llm_judge(client: OpenAI, model_name: str, max_tokens: int, temperature: float, item: Dict[str, Any]) -> Dict[str, Any]:
+def call_llm_judge(
+    client: OpenAI,
+    model_name: str,
+    max_tokens: int,
+    temperature: float,
+    reasoning_effort: str,
+    item: Dict[str, Any],
+) -> Dict[str, Any]:
     started_at = time.perf_counter()
     response = client.chat.completions.create(
         model=model_name,
         temperature=temperature,
         max_tokens=max_tokens,
+        reasoning_effort=reasoning_effort,
         messages=[
             {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
             {"role": "user", "content": build_user_prompt(item)},
@@ -323,6 +331,7 @@ def run_llm_judge(
     model_name: str,
     max_tokens: int,
     temperature: float,
+    reasoning_effort: str = "high",
     judge_structured_enabled: bool = True,
     judge_structured_retries: int = 2,
     judge_structured_fallback_legacy: bool = True,
@@ -425,6 +434,7 @@ def run_llm_judge(
                         retries=judge_structured_retries,
                         temperature=temperature,
                         max_tokens=max_tokens,
+                        reasoning_effort=reasoning_effort,
                     )
                 else:
                     if client is None:
@@ -437,6 +447,7 @@ def run_llm_judge(
                         model_name=model_name,
                         max_tokens=max_tokens,
                         temperature=temperature,
+                        reasoning_effort=reasoning_effort,
                         item=judge_input,
                     )
                 final_score = max_score * float(judge_result["llm_score"])
@@ -465,6 +476,7 @@ def run_llm_judge(
                             model_name=model_name,
                             max_tokens=max_tokens,
                             temperature=temperature,
+                            reasoning_effort=reasoning_effort,
                             item=judge_input,
                         )
                         final_score = max_score * float(judge_result["llm_score"])
@@ -542,8 +554,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--judge-model",
         type=str,
-        default="gpt-4o-mini",
-        help="Judge model name for non-deterministic answer types (default: gpt-4o-mini)",
+        default="gpt-5.2-codex",
+        help="Judge model name for non-deterministic answer types (default: gpt-5.2-codex)",
     )
     parser.add_argument(
         "--max-tokens",
@@ -556,6 +568,13 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Judge temperature (default: 0.0)",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        default="high",
+        choices=["low", "medium", "high"],
+        help="Reasoning effort for judge model calls (default: high)",
     )
     parser.add_argument(
         "--judge-structured-enabled",
@@ -599,6 +618,7 @@ if __name__ == "__main__":
         model_name=args.judge_model,
         max_tokens=args.max_tokens,
         temperature=args.temperature,
+        reasoning_effort=args.reasoning_effort,
         judge_structured_enabled=args.judge_structured_enabled,
         judge_structured_retries=args.judge_structured_retries,
         judge_structured_fallback_legacy=args.judge_structured_fallback_legacy,

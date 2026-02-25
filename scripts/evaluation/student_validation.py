@@ -271,6 +271,7 @@ def run_benchmark_inference(
     student_guard_enabled: bool = True,
     student_guard_mode: str = "on_failure",
     student_guard_retries: int = 2,
+    student_guard_reasoning_effort: str = "high",
     trace_log_enabled: bool = True,
     trace_log_dir: Optional[Path] = None,
 ):
@@ -353,11 +354,12 @@ def run_benchmark_inference(
                                     question=question,
                                     raw_answer=raw_answer,
                                     normalized_answer=student_answer,
-                                    model_name=model_name,
-                                    model_url=model_url,
-                                    api_key=api_key,
-                                    retries=student_guard_retries,
-                                )
+                                model_name=model_name,
+                                model_url=model_url,
+                                api_key=api_key,
+                                retries=student_guard_retries,
+                                reasoning_effort=student_guard_reasoning_effort,
+                            )
                                 guarded_answer = normalize_student_answer(
                                     question.get("answer_type", ""),
                                     guard_output.final_answer,
@@ -580,6 +582,13 @@ if __name__ == "__main__":
         help="PydanticAI student guard retries (default: 2)",
     )
     parser.add_argument(
+        "--student-guard-reasoning-effort",
+        type=str,
+        default="high",
+        choices=["low", "medium", "high"],
+        help="Reasoning effort for PydanticAI student guard (default: high)",
+    )
+    parser.add_argument(
         "--trace-log-enabled",
         type=_str_to_bool,
         default=True,
@@ -621,6 +630,7 @@ if __name__ == "__main__":
             student_guard_enabled=args.student_guard_enabled,
             student_guard_mode=args.student_guard_mode,
             student_guard_retries=args.student_guard_retries,
+            student_guard_reasoning_effort=args.student_guard_reasoning_effort,
             trace_log_enabled=args.trace_log_enabled,
             trace_log_dir=args.trace_log_dir,
         )

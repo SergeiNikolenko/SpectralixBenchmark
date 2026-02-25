@@ -26,6 +26,7 @@ def repair_parsed_questions(
     model_url: Optional[str],
     api_key: Optional[str],
     retries: int,
+    reasoning_effort: str = "high",
 ) -> List[Dict[str, Any]]:
     model = build_openai_chat_model(
         model_name=model_name,
@@ -55,6 +56,7 @@ def repair_parsed_questions(
             model_settings={
                 "temperature": 0.0,
                 "max_tokens": 1200,
+                "reasoning_effort": str(reasoning_effort or "high"),
             },
         )
         output = result.output

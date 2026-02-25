@@ -58,6 +58,7 @@ class AgentRuntime:
         model_kwargs: Dict[str, Any] = {
             "temperature": model_cfg.get("temperature", 0.2),
             "max_tokens": model_cfg.get("max_tokens", 768),
+            "reasoning_effort": str(model_cfg.get("reasoning_effort") or "high"),
         }
         rpm = int(model_cfg.get("requests_per_minute") or 0)
         if rpm > 0:
