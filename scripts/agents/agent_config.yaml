@@ -5,6 +5,8 @@ model:
 
 runtime:
   add_base_tools: true
+  use_structured_outputs_internally: true
+  code_block_tags: markdown
   additional_authorized_imports:
     - math
     - statistics
@@ -24,14 +26,16 @@ security:
     - api.together.xyz
   allow_shell_tools: false
   allow_file_write_tools: false
+  allow_network_tools: false
+  enforce_container_network_isolation: true
 
 sandbox:
   executor_type: docker
   docker:
     image_name: spectralix-smolagent-sandbox
-    build_new_image: true
-    docker_host: null
-    docker_port: null
+    build_new_image: false
+    host: 127.0.0.1
+    port: 8888
     container_run_kwargs:
       read_only: true
       user: "65534:65534"
@@ -47,6 +51,7 @@ sandbox:
 
 tools:
   profiles:
+    code_only: []
     minimal:
       - benchmark_lookup_tool
       - chem_format_tool
@@ -65,3 +70,16 @@ tools:
   mcp:
     enabled: false
     servers: []
+
+pydantic_guard:
+  student:
+    enabled: true
+    mode: on_failure
+    retries: 2
+  judge:
+    enabled: true
+    retries: 2
+    fallback_legacy: true
+  parser:
+    enabled: true
+    retries: 2

@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.agents import AgentRuntime, AgentRuntimeError
+from scripts.pydantic_guard.parser_repair import repair_parsed_questions
 
 try:
     import fitz  # PyMuPDF
@@ -226,8 +227,16 @@ class ExamMarker:
 
     MARKER_PROMPT = PROMPT_PATH.read_text(encoding="utf-8")
 
-    def __init__(self, agent_runtime: Optional[AgentRuntime] = None):
+    def __init__(
+        self,
+        agent_runtime: Optional[AgentRuntime] = None,
+        *,
+        structured_repair_enabled: bool = True,
+        structured_retries: int = 2,
+    ):
         self.agent_runtime = agent_runtime
+        self.structured_repair_enabled = structured_repair_enabled
+        self.structured_retries = max(0, int(structured_retries))
         self.client = (
             OpenAI(api_key=Config.OPENAI_API_KEY, base_url=Config.OPENAI_BASE_URL)
             if OpenAI is not None
@@ -284,7 +293,7 @@ class ExamMarker:
                 response = self.client.chat.completions.create(**payload)
                 response_text = response.choices[0].message.content
 
-            questions = self._parse_response(response_text, page_id)
+            questions = self._parse_response(response_text, exam_id, page_id)
 
             processing_time = time.time() - start_time
             self.logger.info(f"Parsed page {page_id} for exam {exam_id}: {len(questions)} questions")
@@ -304,7 +313,7 @@ class ExamMarker:
             self.logger.error(f"Error parsing page {page_id}: {e}")
             return PageParseResult(exam_id=exam_id, page_id=page_id, path_to_page=image_path)
 
-    def _parse_response(self, response_text: str, page_id: int) -> List[Question]:
+    def _parse_response(self, response_text: str, exam_id: str, page_id: int) -> List[Question]:
         """Parse JSON response from model"""
         questions = []
         
@@ -313,10 +322,13 @@ class ExamMarker:
             json_match = re.search(r'\[[\s\S]*\]', response_text)
             if not json_match:
                 self.logger.warning(f"No JSON array found in response for page {page_id}")
-                return []
-
-            json_str = json_match.group(0)
-            parsed_data = json.loads(json_str)
+                if self.structured_repair_enabled:
+                    parsed_data = self._repair_response(response_text, exam_id, page_id)
+                else:
+                    return []
+            else:
+                json_str = json_match.group(0)
+                parsed_data = json.loads(json_str)
 
             if not isinstance(parsed_data, list):
                 self.logger.warning(f"Expected list, got {type(parsed_data)}")
@@ -336,10 +348,38 @@ class ExamMarker:
 
         except json.JSONDecodeError as e:
             self.logger.error(f"JSON parsing error on page {page_id}: {e}")
+            if self.structured_repair_enabled:
+                repaired = self._repair_response(response_text, exam_id, page_id)
+                if repaired is not None:
+                    return [q for item in repaired if (q := self._construct_question(item))]
             return []
         except Exception as e:
             self.logger.error(f"Unexpected error parsing response: {e}")
+            if self.structured_repair_enabled:
+                repaired = self._repair_response(response_text, exam_id, page_id)
+                if repaired is not None:
+                    return [q for item in repaired if (q := self._construct_question(item))]
             return []
+
+    def _repair_response(self, response_text: str, exam_id: str, page_id: int) -> Optional[List[Dict]]:
+        try:
+            repaired = repair_parsed_questions(
+                raw_response=response_text,
+                marker_prompt=self.MARKER_PROMPT,
+                exam_id=exam_id,
+                page_id=page_id,
+                model_name=Config.MODEL_MARKER,
+                model_url=Config.OPENAI_BASE_URL,
+                api_key=Config.OPENAI_API_KEY,
+                retries=self.structured_retries,
+            )
+            self.logger.info(
+                f"PydanticAI parser repair succeeded for exam={exam_id}, page={page_id}, items={len(repaired)}"
+            )
+            return repaired
+        except Exception as exc:
+            self.logger.error(f"PydanticAI parser repair failed for page {page_id}: {exc}")
+            return None
 
     def _construct_question(self, item: Dict) -> Optional[Question]:
         """Construct Question object from parsed item"""
@@ -422,6 +462,8 @@ class ExamPipeline:
         agent_enabled: bool = True,
         agent_max_steps: int = 6,
         agent_config_path: Optional[Path] = None,
+        parser_structured_repair_enabled: bool = True,
+        parser_structured_retries: int = 2,
     ):
         Config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         Config.ERRORS_DIR.mkdir(parents=True, exist_ok=True)
@@ -453,7 +495,11 @@ class ExamPipeline:
                 self.logger.error("Falling back to legacy direct OpenAI parser mode.")
                 agent_runtime = None
 
-        self.marker = ExamMarker(agent_runtime=agent_runtime)
+        self.marker = ExamMarker(
+            agent_runtime=agent_runtime,
+            structured_repair_enabled=parser_structured_repair_enabled,
+            structured_retries=parser_structured_retries,
+        )
 
     def _resolve_parser_model_url(self) -> str:
         base = (Config.OPENAI_BASE_URL or "").strip().rstrip("/")
@@ -685,6 +731,18 @@ def main():
         default=Config.OPENAI_API_KEY,
         help="Optional API key override (default: OPENAI_API_KEY env)",
     )
+    parser.add_argument(
+        "--parser-structured-repair-enabled",
+        type=_str_to_bool,
+        default=True,
+        help="Enable PydanticAI structured repair when parser output is invalid (default: true)",
+    )
+    parser.add_argument(
+        "--parser-structured-retries",
+        type=int,
+        default=2,
+        help="PydanticAI parser structured repair retries (default: 2)",
+    )
     args = parser.parse_args()
 
     Config.MODEL_MARKER = args.model_marker
@@ -695,6 +753,8 @@ def main():
         agent_enabled=args.agent_enabled,
         agent_max_steps=args.agent_max_steps,
         agent_config_path=args.agent_config,
+        parser_structured_repair_enabled=args.parser_structured_repair_enabled,
+        parser_structured_retries=args.parser_structured_retries,
     )
 
     exams_dir = Config.EXAMS_DIR

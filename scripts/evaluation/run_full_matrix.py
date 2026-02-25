@@ -6,8 +6,18 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+import sys
 
-from student_validation import run_benchmark_inference
+# Ensure repository root is importable when script is run as a file.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+try:
+    from scripts.evaluation.student_validation import run_benchmark_inference
+except Exception:  # pragma: no cover - script execution fallback
+    from student_validation import run_benchmark_inference
+from scripts.agents.models import ensure_chat_completions_url
 
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 
@@ -43,13 +53,10 @@ def _is_truthy(value: Any) -> bool:
 
 
 def _resolve_model_url(model_url: Optional[str], api_base_url: Optional[str]) -> str:
-    base = (model_url or api_base_url or "").strip()
-    if not base:
+    raw_value = (model_url or api_base_url or "").strip()
+    if not raw_value:
         raise ValueError("Either --model-url or --api-base-url must be provided")
-    normalized = base.rstrip("/")
-    if normalized.endswith("/chat/completions"):
-        return normalized
-    return f"{normalized}/chat/completions"
+    return ensure_chat_completions_url(raw_value)
 
 
 def _build_skipped_row(model_name: str) -> Dict[str, Any]:
@@ -377,6 +384,67 @@ def parse_args() -> argparse.Namespace:
         default=Path("scripts/agents/agent_config.yaml"),
         help="Path to agent config YAML",
     )
+    parser.add_argument(
+        "--student-guard-enabled",
+        type=str,
+        default="true",
+        help="Enable PydanticAI student guard (true/false, default: true)",
+    )
+    parser.add_argument(
+        "--student-guard-mode",
+        type=str,
+        default="on_failure",
+        choices=["on_failure", "always", "off"],
+        help="Student guard mode: on_failure|always|off (default: on_failure)",
+    )
+    parser.add_argument(
+        "--student-guard-retries",
+        type=int,
+        default=2,
+        help="Student guard retries (default: 2)",
+    )
+    parser.add_argument(
+        "--trace-log-enabled",
+        type=str,
+        default="true",
+        help="Write per-question student traces (true/false, default: true)",
+    )
+    parser.add_argument(
+        "--trace-log-dir",
+        type=Path,
+        default=None,
+        help="Optional base directory for student traces (per model subdir will be used)",
+    )
+    parser.add_argument(
+        "--judge-structured-enabled",
+        type=str,
+        default="true",
+        help="Enable structured PydanticAI judge (true/false, default: true)",
+    )
+    parser.add_argument(
+        "--judge-structured-retries",
+        type=int,
+        default=2,
+        help="Structured judge retries (default: 2)",
+    )
+    parser.add_argument(
+        "--judge-structured-fallback-legacy",
+        type=str,
+        default="true",
+        help="Fallback to legacy JSON judge parser on structured failure (true/false, default: true)",
+    )
+    parser.add_argument(
+        "--judge-model-url",
+        type=str,
+        default=None,
+        help="Optional judge model URL/base URL for OpenAI-compatible endpoints",
+    )
+    parser.add_argument(
+        "--judge-api-key",
+        type=str,
+        default=None,
+        help="Optional API key override for judge stage",
+    )
     return parser.parse_args()
 
 
@@ -411,6 +479,9 @@ def main() -> None:
 
         print(f"[INFO] Running student inference for model={model_name}")
         agent_enabled = _is_truthy(args.agent_enabled)
+        student_guard_enabled = _is_truthy(args.student_guard_enabled)
+        trace_log_enabled = _is_truthy(args.trace_log_enabled)
+        trace_log_dir = (args.trace_log_dir / model_slug) if args.trace_log_dir else (model_dir / "traces")
         run_benchmark_inference(
             benchmark_path=args.benchmark_path,
             output_path=student_output_path,
@@ -428,6 +499,11 @@ def main() -> None:
             agent_sandbox=args.agent_sandbox,
             agent_tools_profile=args.agent_tools_profile,
             agent_config=args.agent_config,
+            student_guard_enabled=student_guard_enabled,
+            student_guard_mode=args.student_guard_mode,
+            student_guard_retries=args.student_guard_retries,
+            trace_log_enabled=trace_log_enabled,
+            trace_log_dir=trace_log_dir,
         )
 
         student_rows = read_jsonl(student_output_path)
@@ -454,6 +530,11 @@ def main() -> None:
             model_name=args.judge_model,
             max_tokens=args.judge_max_tokens,
             temperature=args.judge_temperature,
+            judge_structured_enabled=_is_truthy(args.judge_structured_enabled),
+            judge_structured_retries=args.judge_structured_retries,
+            judge_structured_fallback_legacy=_is_truthy(args.judge_structured_fallback_legacy),
+            judge_model_url=args.judge_model_url,
+            judge_api_key=args.judge_api_key or args.api_key,
         )
 
         judge_rows = read_jsonl(judge_output_path)

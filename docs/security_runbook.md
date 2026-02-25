@@ -23,6 +23,7 @@ Applies to:
 - `security_opt: ["no-new-privileges"]`
 - memory / CPU / pids limits
 - writable `tmpfs` only for `/tmp`
+- `build_new_image: false` by default (rebuild only when explicitly required)
 
 3. Workspace policy
 - Mount repository into container as read-only.
@@ -30,10 +31,18 @@ Applies to:
 
 4. Tool policy
 - Keep shell/file-write tools disabled.
+- `runtime.add_base_tools: true` enables built-in `web_search` and `visit_webpage` tools.
+- If strict no-web mode is required, set `runtime.add_base_tools: false`.
 - Enable only explicit allowlisted tools from `agent_config.yaml`.
 - External HTTP fetch is allowed only for `security.allowed_tool_hosts`.
+- Keep `security.allow_network_tools: false` unless external fetch tools are required.
 
-5. MCP policy
+5. Pydantic guard policy
+- `PydanticAI` is a validation/repair layer only (`scripts/pydantic_guard/*`).
+- It must not receive direct shell, arbitrary file-write, or unrestricted network tools.
+- It must run against the same controlled model endpoint policy as the main runtime.
+
+6. MCP policy
 - MCP is disabled by default.
 - If enabled, every server must be explicitly listed in config and host-allowlisted.
 
@@ -43,13 +52,15 @@ Before running:
 
 ```bash
 docker info >/dev/null
-python3 -c "import smolagents, yaml; print('ok')"
+uv run python -c "import smolagents, yaml; print('ok')"
 ```
+
+The runtime performs Docker preflight once before benchmark loop and fails fast on sandbox unavailability.
 
 Quick smoke test:
 
 ```bash
-python3 scripts/evaluation/student_validation.py \
+uv run python scripts/evaluation/student_validation.py \
   --benchmark-path benchmark/benchmark_v1_0.jsonl \
   --output-path scripts/evaluation/student_output_smoke.jsonl \
   --api-base-url "http://127.0.0.1:8317/v1" \
@@ -81,5 +92,5 @@ If unexpected file mutation or policy bypass is detected:
 1. Stop pipeline runs immediately.
 2. Preserve generated run artifacts and logs.
 3. Rotate API credentials.
-4. Set `--agent-enabled false` and use `student_validation_legacy.py` until mitigated.
+4. Temporarily switch to minimal tool profile (`--agent-tools-profile minimal`) until mitigated.
 5. Review and tighten `scripts/agents/agent_config.yaml`.

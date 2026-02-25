@@ -10,6 +10,7 @@ This package contains the production runtime used by evaluation and parsing pipe
 - `tool_registry.py`: custom tool definitions and tool profile assembly
 - `prompts.py`: task prompt builders for student and parser stages
 - `agent_config.yaml`: default runtime/sandbox/tool policy
+- `pydantic_guard` block in config: defaults for student/judge/parser structured guards
 
 ## Design Rules
 
@@ -17,3 +18,6 @@ This package contains the production runtime used by evaluation and parsing pipe
 - Fail fast on invalid runtime configuration.
 - Default to Docker sandbox with restricted privileges.
 - Allow tools only through explicit profile selection and host allowlists.
+- Reuse one initialized `CodeAgent` session per runtime instance to reduce overhead.
+- Keep container egress disabled by default (`security.allow_network_tools: false`).
+- Keep `smolagents` as orchestration runtime; use `PydanticAI` only as a typed guard layer.

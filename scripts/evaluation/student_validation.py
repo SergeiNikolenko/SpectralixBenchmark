@@ -1,14 +1,13 @@
 import argparse
+import io
 import json
 import re
 import time
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, TextIO
 import sys
-import os
 
-import requests
-from requests import Response
 from tqdm import tqdm
 
 # Ensure repository root is importable when script is run as a file.
@@ -18,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.agents import AgentRuntime, AgentRuntimeError
 from scripts.agents.models import ensure_chat_completions_url
+from scripts.pydantic_guard.student_guard import is_answer_invalid, run_student_guard
 
 STATUS_OK = "ok"
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
@@ -29,6 +29,20 @@ class StudentCallError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+class _TeeStream:
+    def __init__(self, *streams: TextIO):
+        self._streams = streams
+
+    def write(self, data: str) -> int:
+        for stream in self._streams:
+            stream.write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            stream.flush()
 
 
 def normalize_answer_type(answer_type: Optional[str]) -> str:
@@ -55,32 +69,6 @@ def load_benchmark_questions(benchmark_path: Path) -> List[Dict[str, Any]]:
             questions.append(question)
 
     return questions
-
-
-def _format_instruction(answer_type: str) -> str:
-    if answer_type == "single_choice":
-        return "Return only one option label (example: A)."
-    if answer_type == "multiple_choice":
-        return "Return only option labels separated by '; ' (example: A; D)."
-    if answer_type == "ordering":
-        return "Return only the ordered labels/numbers separated by '; ' (example: 4; 2; 3; 1)."
-    if answer_type in {"msms_structure_prediction", "structure"}:
-        return "Return only one SMILES string on a single line."
-    return (
-        "Start the response with 'Answer: <machine-readable answer>'. "
-        "If needed, add a very short explanation after that line."
-    )
-
-
-def build_prompt(question: Dict[str, Any]) -> str:
-    answer_type = normalize_answer_type(question.get("answer_type"))
-    return (
-        "You are solving a chemistry benchmark task. "
-        "Follow the output format exactly.\n\n"
-        f"Output format rule: {_format_instruction(answer_type)}\n\n"
-        "Question:\n"
-        f"{question.get('question_text', '')}"
-    )
 
 
 def _extract_answer_payload(raw_text: str) -> str:
@@ -146,14 +134,6 @@ def normalize_student_answer(answer_type: str, raw_text: str, max_len: int = 100
     return compact[:max_len]
 
 
-def _classify_http_error(response: Optional[Response]) -> str:
-    if response is None:
-        return "http_error"
-    if response.status_code in {401, 403}:
-        return "auth_error"
-    return "http_error"
-
-
 def _sanitize_error(error: Exception, limit: int = 240) -> str:
     message = str(error).strip() or error.__class__.__name__
     if len(message) > limit:
@@ -161,43 +141,57 @@ def _sanitize_error(error: Exception, limit: int = 240) -> str:
     return message
 
 
-def _build_request_headers(api_key: Optional[str]) -> Dict[str, str]:
-    resolved_api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("AITUNNEL_API_KEY")
-    header_name = (os.getenv("OPENAI_API_KEY_HEADER") or "Authorization").strip() or "Authorization"
-    header_prefix = (os.getenv("OPENAI_API_KEY_PREFIX") or "Bearer").strip()
-
-    headers = {"Content-Type": "application/json"}
-    if resolved_api_key:
-        token_value = f"{header_prefix} {resolved_api_key}".strip() if header_prefix else resolved_api_key
-        headers[header_name] = token_value
-    return headers
+def _slug_for_filename(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        text = fallback
+    text = re.sub(r"[^a-zA-Z0-9._-]+", "_", text).strip("._-")
+    return text or fallback
 
 
-def _extract_response_text(data: Dict[str, Any]) -> Optional[str]:
-    if "message" in data and "content" in data["message"]:
-        return data["message"]["content"].strip()
-    if "choices" in data and data["choices"]:
-        return data["choices"][0]["message"]["content"].strip()
-    if "response" in data:
-        return data["response"].strip()
-    return None
+def _build_trace_log_path(trace_log_dir: Path, question: Dict[str, Any], line_idx: int) -> Path:
+    exam_id = _slug_for_filename(question.get("exam_id"), "exam")
+    page_id = _slug_for_filename(question.get("page_id"), "page")
+    question_id = _slug_for_filename(question.get("question_id"), f"line_{line_idx}")
+    return trace_log_dir / f"{line_idx:04d}_{exam_id}_p{page_id}_q{question_id}.log"
 
 
-def _extract_jsonl_response_text(content: str) -> str:
-    full_response = ""
-    for line in content.splitlines():
-        if not line.strip():
-            continue
-        try:
-            chunk = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+def _write_trace_log(
+    *,
+    trace_log_path: Path,
+    question: Dict[str, Any],
+    model_name: str,
+    student_status: str,
+    student_error: str,
+    student_answer: str,
+    raw_answer: str,
+    elapsed_ms: int,
+    captured_trace: str,
+) -> None:
+    trace_payload = {
+        "exam_id": question.get("exam_id"),
+        "page_id": question.get("page_id"),
+        "question_id": question.get("question_id"),
+        "answer_type": question.get("answer_type"),
+        "model_name": model_name,
+        "student_status": student_status,
+        "student_error": student_error,
+        "student_elapsed_ms": elapsed_ms,
+    }
 
-        if "message" in chunk and "content" in chunk["message"]:
-            full_response += chunk["message"]["content"]
-        elif "response" in chunk:
-            full_response += chunk["response"]
-    return full_response.strip()
+    content = (
+        "=== TRACE METADATA ===\n"
+        f"{json.dumps(trace_payload, ensure_ascii=False, indent=2)}\n\n"
+        "=== QUESTION TEXT ===\n"
+        f"{question.get('question_text', '')}\n\n"
+        "=== AGENT STDOUT/STDERR TRACE ===\n"
+        f"{captured_trace.strip() or '<empty>'}\n\n"
+        "=== RAW MODEL ANSWER ===\n"
+        f"{raw_answer or '<empty>'}\n\n"
+        "=== NORMALIZED STUDENT ANSWER ===\n"
+        f"{student_answer or '<empty>'}\n"
+    )
+    trace_log_path.write_text(content, encoding="utf-8")
 
 
 def _wait_or_raise_retry(
@@ -217,82 +211,6 @@ def _wait_or_raise_retry(
         f"{error.message}. Retrying in {wait_time}s..."
     )
     time.sleep(wait_time)
-
-
-def call_chemllm_legacy(
-    prompt: str,
-    model_url: str,
-    model_name: str,
-    max_tokens: int,
-    temperature: float,
-    timeout: int,
-    api_key: Optional[str] = None,
-    max_retries: int = 3,
-) -> str:
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "stream": False,
-    }
-
-    retryable_statuses = {"timeout", "connection_error", "http_error", "parse_error"}
-
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(
-                model_url,
-                headers=_build_request_headers(api_key),
-                json=payload,
-                timeout=timeout,
-            )
-            response.raise_for_status()
-
-            try:
-                data = response.json()
-            except json.JSONDecodeError as exc:
-                content = response.text.strip()
-                if content:
-                    full_response = _extract_jsonl_response_text(content)
-                    if full_response:
-                        return full_response
-                raise StudentCallError("parse_error", f"Failed to parse response as JSON: {exc}")
-
-            response_text = _extract_response_text(data)
-            if response_text is not None:
-                return response_text
-
-            raise StudentCallError("parse_error", "Unexpected response format")
-
-        except requests.Timeout as exc:
-            status = "timeout"
-            final_error = StudentCallError(status, _sanitize_error(exc))
-        except requests.ConnectionError as exc:
-            status = "connection_error"
-            final_error = StudentCallError(status, _sanitize_error(exc))
-        except requests.HTTPError as exc:
-            status = _classify_http_error(exc.response)
-            final_error = StudentCallError(status, _sanitize_error(exc))
-        except StudentCallError as exc:
-            status = exc.status
-            final_error = exc
-        except requests.RequestException as exc:
-            status = "http_error"
-            final_error = StudentCallError(status, _sanitize_error(exc))
-        except Exception as exc:
-            status = "parse_error"
-            final_error = StudentCallError(status, _sanitize_error(exc))
-
-        _wait_or_raise_retry(
-            attempt=attempt,
-            max_retries=max_retries,
-            status=status,
-            retryable_statuses=retryable_statuses,
-            error=final_error,
-        )
-
-    raise StudentCallError("parse_error", "Unreachable retry state")
 
 
 def call_agent(
@@ -350,7 +268,15 @@ def run_benchmark_inference(
     agent_tools_profile: str = "full",
     agent_config: Optional[Path] = Path("scripts/agents/agent_config.yaml"),
     api_key: Optional[str] = None,
+    student_guard_enabled: bool = True,
+    student_guard_mode: str = "on_failure",
+    student_guard_retries: int = 2,
+    trace_log_enabled: bool = True,
+    trace_log_dir: Optional[Path] = None,
 ):
+    _ = max_tokens
+    _ = temperature
+
     questions = load_benchmark_questions(benchmark_path=benchmark_path)
     if limit is not None and limit >= 0:
         questions = questions[:limit]
@@ -359,89 +285,149 @@ def run_benchmark_inference(
             f"workers={workers} requested; running in sequential mode in this script version."
         )
 
-    runtime: Optional[AgentRuntime] = None
-    if agent_enabled:
-        try:
-            runtime = AgentRuntime(
-                model_url=model_url,
-                model_name=model_name,
-                benchmark_path=benchmark_path,
-                api_key=api_key,
-                config_path=agent_config,
-                max_steps=agent_max_steps,
-                sandbox=agent_sandbox,
-                tools_profile=agent_tools_profile,
-                timeout_sec=timeout,
-            )
-        except Exception as exc:
-            raise RuntimeError(f"Failed to initialize agent runtime: {exc}") from exc
+    if not agent_enabled:
+        tqdm.write("agent_enabled=false is deprecated; legacy backend was removed. Using agent runtime.")
+
+    try:
+        runtime = AgentRuntime(
+            model_url=model_url,
+            model_name=model_name,
+            benchmark_path=benchmark_path,
+            api_key=api_key,
+            config_path=agent_config,
+            max_steps=agent_max_steps,
+            sandbox=agent_sandbox,
+            tools_profile=agent_tools_profile,
+            timeout_sec=timeout,
+        )
+        runtime.preflight()
+    except AgentRuntimeError as exc:
+        raise RuntimeError(f"Agent preflight failed: {exc.status}: {exc.message}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Failed to initialize agent runtime: {exc}") from exc
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_trace_log_dir = trace_log_dir or (output_path.parent / "traces")
+    if trace_log_enabled:
+        resolved_trace_log_dir.mkdir(parents=True, exist_ok=True)
+    guard_mode = (student_guard_mode or "on_failure").strip().lower()
+    if guard_mode not in {"on_failure", "always", "off"}:
+        raise ValueError(f"Invalid student_guard_mode: {student_guard_mode}")
 
-    with output_path.open("w", encoding="utf-8") as f_out:
-        for line_idx, question in enumerate(
-            tqdm(questions, total=len(questions), desc="Validating student answers"),
-            start=1,
-        ):
-            started_at = time.perf_counter()
-            student_status = STATUS_OK
-            student_error = ""
-            student_answer = ""
+    try:
+        with output_path.open("w", encoding="utf-8") as f_out:
+            for line_idx, question in enumerate(
+                tqdm(questions, total=len(questions), desc="Validating student answers"),
+                start=1,
+            ):
+                started_at = time.perf_counter()
+                student_status = STATUS_OK
+                student_error = ""
+                student_answer = ""
+                raw_answer = ""
+                trace_buffer = io.StringIO()
 
-            try:
-                if runtime is not None:
-                    raw_answer = call_agent(
-                        runtime=runtime,
+                tee_stdout = _TeeStream(sys.stdout, trace_buffer)
+                tee_stderr = _TeeStream(sys.stderr, trace_buffer)
+                with redirect_stdout(tee_stdout), redirect_stderr(tee_stderr):
+                    try:
+                        raw_answer = call_agent(
+                            runtime=runtime,
+                            question=question,
+                            max_retries=max_retries,
+                        )
+
+                        student_answer = normalize_student_answer(
+                            question.get("answer_type", ""),
+                            raw_answer,
+                        )
+                        guard_on_failure = is_answer_invalid(question.get("answer_type", ""), student_answer)
+                        should_run_guard = (
+                            student_guard_enabled
+                            and guard_mode != "off"
+                            and (guard_mode == "always" or guard_on_failure)
+                        )
+                        if should_run_guard:
+                            try:
+                                guard_output = run_student_guard(
+                                    question=question,
+                                    raw_answer=raw_answer,
+                                    normalized_answer=student_answer,
+                                    model_name=model_name,
+                                    model_url=model_url,
+                                    api_key=api_key,
+                                    retries=student_guard_retries,
+                                )
+                                guarded_answer = normalize_student_answer(
+                                    question.get("answer_type", ""),
+                                    guard_output.final_answer,
+                                )
+                                if guarded_answer:
+                                    student_answer = guarded_answer
+                                elif guard_on_failure:
+                                    raise StudentCallError(
+                                        "parse_error",
+                                        "Student guard returned empty normalized answer",
+                                    )
+                            except StudentCallError:
+                                raise
+                            except Exception as exc:
+                                if guard_on_failure:
+                                    raise StudentCallError(
+                                        "parse_error",
+                                        f"Student guard failed: {_sanitize_error(exc)}",
+                                    ) from exc
+                                tqdm.write(f"[WARN] Student guard skipped: {_sanitize_error(exc)}")
+                    except StudentCallError as exc:
+                        student_status = exc.status
+                        student_error = exc.message
+                        student_answer = ""
+                        tqdm.write(f"[ERROR] Line {line_idx}: status={student_status} error={student_error}")
+                    except Exception as exc:  # Defensive fallback
+                        student_status = "parse_error"
+                        student_error = _sanitize_error(exc, limit=max_error_len)
+                        student_answer = ""
+                        tqdm.write(f"[ERROR] Line {line_idx}: status={student_status} error={student_error}")
+
+                elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+
+                if student_error:
+                    student_error = student_error[:max_error_len]
+
+                if trace_log_enabled:
+                    trace_log_path = _build_trace_log_path(
+                        trace_log_dir=resolved_trace_log_dir,
                         question=question,
-                        max_retries=max_retries,
+                        line_idx=line_idx,
                     )
-                else:
-                    prompt = build_prompt(question)
-                    raw_answer = call_chemllm_legacy(
-                        prompt,
-                        model_url=model_url,
+                    _write_trace_log(
+                        trace_log_path=trace_log_path,
+                        question=question,
                         model_name=model_name,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        timeout=timeout,
-                        api_key=api_key,
-                        max_retries=max_retries,
+                        student_status=student_status,
+                        student_error=student_error,
+                        student_answer=student_answer,
+                        raw_answer=raw_answer,
+                        elapsed_ms=elapsed_ms,
+                        captured_trace=trace_buffer.getvalue(),
                     )
 
-                student_answer = normalize_student_answer(
-                    question.get("answer_type", ""),
-                    raw_answer,
-                )
-            except StudentCallError as exc:
-                student_status = exc.status
-                student_error = exc.message
-                student_answer = ""
-                tqdm.write(f"[ERROR] Line {line_idx}: status={student_status} error={student_error}")
-            except Exception as exc:  # Defensive fallback
-                student_status = "parse_error"
-                student_error = _sanitize_error(exc, limit=max_error_len)
-                student_answer = ""
-                tqdm.write(f"[ERROR] Line {line_idx}: status={student_status} error={student_error}")
+                result = {
+                    "exam_id": question.get("exam_id"),
+                    "page_id": question.get("page_id"),
+                    "question_id": question.get("question_id"),
+                    "question_type": question.get("question_type"),
+                    "question_text": question.get("question_text"),
+                    "answer_type": question.get("answer_type"),
+                    "student_answer": student_answer,
+                    "student_status": student_status,
+                    "student_error": student_error,
+                    "student_elapsed_ms": elapsed_ms,
+                }
 
-            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-
-            if student_error:
-                student_error = student_error[:max_error_len]
-
-            result = {
-                "exam_id": question.get("exam_id"),
-                "page_id": question.get("page_id"),
-                "question_id": question.get("question_id"),
-                "question_type": question.get("question_type"),
-                "question_text": question.get("question_text"),
-                "answer_type": question.get("answer_type"),
-                "student_answer": student_answer,
-                "student_status": student_status,
-                "student_error": student_error,
-                "student_elapsed_ms": elapsed_ms,
-            }
-
-            f_out.write(json.dumps(result, ensure_ascii=False) + "\n")
+                f_out.write(json.dumps(result, ensure_ascii=False) + "\n")
+    finally:
+        runtime.close()
 
 
 def _str_to_bool(value: str) -> bool:
@@ -463,7 +449,7 @@ def _resolve_model_url(model_url: Optional[str], api_base_url: Optional[str]) ->
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Benchmark student answers using an agentic runtime (smolagents) or legacy HTTP mode"
+        description="Benchmark student answers using an agentic runtime (smolagents)"
     )
     parser.add_argument(
         "--benchmark-path",
@@ -505,19 +491,19 @@ if __name__ == "__main__":
         "--max-tokens",
         type=int,
         default=256,
-        help="Maximum number of tokens in the response (default: 256)",
+        help="Maximum number of tokens in the response (kept for CLI compatibility)",
     )
     parser.add_argument(
         "--temperature",
         type=float,
         default=0.5,
-        help="Temperature for sampling (default: 0.5)",
+        help="Temperature for sampling (kept for CLI compatibility)",
     )
     parser.add_argument(
         "--timeout",
         type=int,
         default=120,
-        help="Timeout in seconds for API requests (default: 120)",
+        help="Timeout in seconds for agent requests (default: 120)",
     )
     parser.add_argument(
         "--max-retries",
@@ -548,7 +534,7 @@ if __name__ == "__main__":
         "--agent-enabled",
         type=_str_to_bool,
         default=True,
-        help="Enable smolagents runtime (default: true)",
+        help="Enable agent runtime (default: true; false is accepted for compatibility)",
     )
     parser.add_argument(
         "--agent-max-steps",
@@ -574,6 +560,37 @@ if __name__ == "__main__":
         default=Path("scripts/agents/agent_config.yaml"),
         help="Path to agent YAML config (default: scripts/agents/agent_config.yaml)",
     )
+    parser.add_argument(
+        "--student-guard-enabled",
+        type=_str_to_bool,
+        default=True,
+        help="Enable PydanticAI student answer guard (default: true)",
+    )
+    parser.add_argument(
+        "--student-guard-mode",
+        type=str,
+        default="on_failure",
+        choices=["on_failure", "always", "off"],
+        help="When to run student guard: on_failure|always|off (default: on_failure)",
+    )
+    parser.add_argument(
+        "--student-guard-retries",
+        type=int,
+        default=2,
+        help="PydanticAI student guard retries (default: 2)",
+    )
+    parser.add_argument(
+        "--trace-log-enabled",
+        type=_str_to_bool,
+        default=True,
+        help="Write per-question detailed traces (stdout/stderr, raw answer, normalized answer)",
+    )
+    parser.add_argument(
+        "--trace-log-dir",
+        type=Path,
+        default=None,
+        help="Directory for per-question trace logs (default: <output-dir>/traces)",
+    )
 
     args = parser.parse_args()
 
@@ -582,22 +599,30 @@ if __name__ == "__main__":
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
 
-    run_benchmark_inference(
-        benchmark_path=args.benchmark_path,
-        output_path=args.output_path,
-        model_url=resolved_model_url,
-        model_name=args.model_name,
-        api_key=args.api_key,
-        max_tokens=args.max_tokens,
-        temperature=args.temperature,
-        timeout=args.timeout,
-        max_retries=args.max_retries,
-        max_error_len=args.max_error_len,
-        limit=args.limit,
-        workers=args.workers,
-        agent_enabled=args.agent_enabled,
-        agent_max_steps=args.agent_max_steps,
-        agent_sandbox=args.agent_sandbox,
-        agent_tools_profile=args.agent_tools_profile,
-        agent_config=args.agent_config,
-    )
+    try:
+        run_benchmark_inference(
+            benchmark_path=args.benchmark_path,
+            output_path=args.output_path,
+            model_url=resolved_model_url,
+            model_name=args.model_name,
+            api_key=args.api_key,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+            timeout=args.timeout,
+            max_retries=args.max_retries,
+            max_error_len=args.max_error_len,
+            limit=args.limit,
+            workers=args.workers,
+            agent_enabled=args.agent_enabled,
+            agent_max_steps=args.agent_max_steps,
+            agent_sandbox=args.agent_sandbox,
+            agent_tools_profile=args.agent_tools_profile,
+            agent_config=args.agent_config,
+            student_guard_enabled=args.student_guard_enabled,
+            student_guard_mode=args.student_guard_mode,
+            student_guard_retries=args.student_guard_retries,
+            trace_log_enabled=args.trace_log_enabled,
+            trace_log_dir=args.trace_log_dir,
+        )
+    except Exception as exc:
+        raise SystemExit(f"[ERROR] {exc}") from exc

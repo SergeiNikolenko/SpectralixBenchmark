@@ -278,8 +278,9 @@ def safe_http_get_tool(url: str, timeout_sec: int = 10) -> str:
         for h in (os.getenv("AGENT_ALLOWED_HOSTS") or "").split(",")
         if h.strip()
     }
+    allow_all_hosts = "*" in allowed_hosts
 
-    if allowed_hosts and host not in allowed_hosts:
+    if not allow_all_hosts and allowed_hosts and host not in allowed_hosts:
         return json.dumps({"status": "error", "reason": "host_not_allowed", "host": host})
 
     req = Request(url, headers={"User-Agent": "SpectralixAgent/1.0"}, method="GET")
@@ -311,11 +312,15 @@ TOOL_REGISTRY = {
 
 def build_tools(profile: str, config: Dict[str, Any]) -> List[Any]:
     profiles = ((config.get("tools") or {}).get("profiles") or {})
-    selected = profiles.get(profile) or profiles.get("minimal") or []
+    if profile not in profiles:
+        known_profiles = ", ".join(sorted(profiles.keys()))
+        raise ValueError(f"Unknown tools profile '{profile}'. Known profiles: {known_profiles}")
+    selected = profiles[profile]
     security = config.get("security") or {}
     has_allowed_hosts = bool(security.get("allowed_tool_hosts"))
     allow_shell_tools = bool(security.get("allow_shell_tools", False))
     allow_file_write_tools = bool(security.get("allow_file_write_tools", False))
+    allow_network_tools = bool(security.get("allow_network_tools", False))
     tools: List[Any] = []
 
     for name in selected:
@@ -323,7 +328,7 @@ def build_tools(profile: str, config: Dict[str, Any]) -> List[Any]:
         if tool_obj is None:
             raise ValueError(f"Unknown tool in profile '{profile}': {name}")
 
-        if name == "safe_http_get_tool" and not has_allowed_hosts:
+        if name == "safe_http_get_tool" and (not has_allowed_hosts or not allow_network_tools):
             # Keep tool disabled when allowlist is empty.
             continue
 

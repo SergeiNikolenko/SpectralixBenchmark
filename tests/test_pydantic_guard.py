@@ -1,0 +1,131 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from pydantic import ValidationError
+
+from scripts.evaluation.llm_judge import deterministic_score, run_llm_judge
+from scripts.pydantic_guard.retry import run_with_retries
+from scripts.pydantic_guard.schemas import JudgeResult, ParsedQuestionSchema, StudentGuardOutput
+from scripts.pydantic_guard.student_guard import is_answer_invalid
+
+
+class SchemaTests(unittest.TestCase):
+    def test_judge_result_range_validation(self):
+        with self.assertRaises(ValidationError):
+            JudgeResult(llm_score=1.2, llm_comment="bad")
+
+    def test_student_guard_output_requires_non_empty_answer(self):
+        with self.assertRaises(ValidationError):
+            StudentGuardOutput(final_answer="", format_ok=True)
+
+    def test_parsed_question_requires_fields_for_ok_status(self):
+        with self.assertRaises(ValidationError):
+            ParsedQuestionSchema(status="ok", question_id=1, answer_type="text")
+
+    def test_parsed_question_allows_error_status_minimal(self):
+        item = ParsedQuestionSchema(status="error", question_id=1, error_comment="bad parse")
+        self.assertEqual(item.status, "error")
+
+
+class RetryTests(unittest.TestCase):
+    def test_retry_succeeds_after_transient_failures(self):
+        state = {"attempt": 0}
+
+        def flaky():
+            state["attempt"] += 1
+            if state["attempt"] < 3:
+                raise ValueError("retry")
+            return "ok"
+
+        result = run_with_retries(flaky, retries=3, retry_on=(ValueError,))
+        self.assertEqual(result, "ok")
+        self.assertEqual(state["attempt"], 3)
+
+
+class StudentGuardHeuristicTests(unittest.TestCase):
+    def test_is_answer_invalid(self):
+        self.assertTrue(is_answer_invalid("single_choice", ""))
+        self.assertTrue(is_answer_invalid("single_choice", "A B"))
+        self.assertFalse(is_answer_invalid("single_choice", "A"))
+        self.assertFalse(is_answer_invalid("ordering", "2; 1"))
+
+
+class JudgeDeterministicTests(unittest.TestCase):
+    def test_msms_string_match_is_case_insensitive(self):
+        result = deterministic_score(
+            answer_type="msms_structure_prediction",
+            student_answer="CC(=O)Nc1ccccc1",
+            canonical_answer="cc(=o)nc1ccccc1",
+        )
+        self.assertEqual(result["llm_score"], 1.0)
+
+
+class JudgeFallbackTests(unittest.TestCase):
+    def test_structured_failure_falls_back_to_legacy(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            input_path = tmp / "student.jsonl"
+            gold_path = tmp / "gold.jsonl"
+            output_path = tmp / "judge.jsonl"
+
+            student_row = {
+                "exam_id": "exam_1",
+                "page_id": "1",
+                "question_id": "1",
+                "question_type": "text",
+                "question_text": "Explain result",
+                "answer_type": "text",
+                "student_answer": "demo",
+                "student_status": "ok",
+                "student_error": "",
+                "student_elapsed_ms": 10,
+            }
+            gold_row = {
+                "exam_id": "exam_1",
+                "page_id": "1",
+                "question_id": "1",
+                "question_type": "text",
+                "question_text": "Explain result",
+                "answer_type": "text",
+                "canonical_answer": "expected",
+                "max_score": 5,
+            }
+
+            input_path.write_text(json.dumps(student_row) + "\n", encoding="utf-8")
+            gold_path.write_text(json.dumps(gold_row) + "\n", encoding="utf-8")
+
+            with mock.patch("scripts.evaluation.llm_judge.run_structured_judge", side_effect=RuntimeError("boom")):
+                with mock.patch(
+                    "scripts.evaluation.llm_judge.call_llm_judge",
+                    return_value={
+                        "llm_score": 0.5,
+                        "llm_comment": "legacy path",
+                        "judge_request_id": "r1",
+                        "judge_latency_ms": 1,
+                    },
+                ):
+                    run_llm_judge(
+                        input_path=input_path,
+                        gold_path=gold_path,
+                        output_path=output_path,
+                        model_name="judge-model",
+                        max_tokens=128,
+                        temperature=0.0,
+                        judge_structured_enabled=True,
+                        judge_structured_retries=1,
+                        judge_structured_fallback_legacy=True,
+                        judge_api_key="test-key",
+                    )
+
+            rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            self.assertEqual(row["row_status"], "ok")
+            self.assertIn("legacy_fallback", row["llm_comment"])
+
+
+if __name__ == "__main__":
+    unittest.main()

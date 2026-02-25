@@ -48,7 +48,11 @@ class AgentRuntime:
 
         self.config = load_agent_config(config_path)
         self.executor_type = sandbox or (self.config.get("sandbox") or {}).get("executor_type", "docker")
-        self.executor_kwargs = build_executor_kwargs(self.config, self.workspace_dir)
+        self.executor_kwargs = (
+            build_executor_kwargs(self.config, self.workspace_dir)
+            if self.executor_type == "docker"
+            else {}
+        )
 
         model_cfg = self.config.get("model") or {}
         model_kwargs: Dict[str, Any] = {
@@ -67,13 +71,30 @@ class AgentRuntime:
         )
 
         runtime_cfg = self.config.get("runtime") or {}
-        self.add_base_tools = bool(runtime_cfg.get("add_base_tools", True))
+        self.add_base_tools = bool(runtime_cfg.get("add_base_tools", False))
+        self.use_structured_outputs_internally = bool(
+            runtime_cfg.get("use_structured_outputs_internally", True)
+        )
+        self.code_block_tags = runtime_cfg.get("code_block_tags", "markdown")
         self.additional_authorized_imports = list(
             runtime_cfg.get("additional_authorized_imports") or []
         )
+        if self.add_base_tools:
+            try:
+                import ddgs  # noqa: F401
+                import markdownify  # noqa: F401
+            except Exception as exc:
+                raise ValueError(
+                    "runtime.add_base_tools=true requires toolkit dependencies. "
+                    "Install with: pip install 'smolagents[toolkit]' (or ddgs + markdownify) "
+                    "or set add_base_tools=false."
+                ) from exc
 
         security_cfg = self.config.get("security") or {}
         self.allowed_hosts = [h.strip() for h in security_cfg.get("allowed_tool_hosts") or [] if h.strip()]
+        self._agent: Optional[Any] = None
+        self._agent_stack: Optional[ExitStack] = None
+        self._preflight_done = False
 
     def solve_question(self, question: Dict[str, Any]) -> str:
         task = build_student_task(question)
@@ -162,24 +183,11 @@ class AgentRuntime:
             os.environ["AGENT_ALLOWED_HOSTS"] = ",".join(self.allowed_hosts)
 
         try:
-            with ExitStack() as stack:
-                local_tools = build_tools(self.tools_profile, self.config)
-                mcp_tools = self._load_mcp_tools(stack, MCPClient)
-                all_tools = [*local_tools, *mcp_tools]
-
-                agent = CodeAgent(
-                    model=self.model,
-                    tools=all_tools,
-                    add_base_tools=self.add_base_tools,
-                    max_steps=self.max_steps,
-                    executor_type=self.executor_type,
-                    executor_kwargs=self.executor_kwargs,
-                    additional_authorized_imports=self.additional_authorized_imports,
-                )
-
-                result = self._run_code_agent(agent=agent, task=task, images=images)
-
-                return "" if result is None else str(result).strip()
+            self._ensure_agent(CodeAgent, MCPClient)
+            if self._agent is None:
+                raise AgentRuntimeError(status="parse_error", message="Agent runtime initialization failed")
+            result = self._run_code_agent(agent=self._agent, task=task, images=images)
+            return "" if result is None else str(result).strip()
 
         except AgentRuntimeError:
             raise
@@ -195,10 +203,68 @@ class AgentRuntime:
 
     def _run_code_agent(self, agent: Any, task: str, images: Optional[List[Any]]) -> Any:
         run_kwargs = {"task": task, "max_steps": self.max_steps, "images": images}
-        if hasattr(agent, "__enter__") and hasattr(agent, "__exit__"):
-            with agent:
-                return agent.run(**run_kwargs)
         return agent.run(**run_kwargs)
+
+    def _ensure_agent(self, code_agent_cls: Any, mcp_client_cls: Any) -> None:
+        if self._agent is not None:
+            return
+        self.preflight()
+        stack = ExitStack()
+        try:
+            local_tools = build_tools(self.tools_profile, self.config)
+            mcp_tools = self._load_mcp_tools(stack, mcp_client_cls)
+            all_tools = [*local_tools, *mcp_tools]
+
+            agent = code_agent_cls(
+                model=self.model,
+                tools=all_tools,
+                add_base_tools=self.add_base_tools,
+                max_steps=self.max_steps,
+                executor_type=self.executor_type,
+                executor_kwargs=self.executor_kwargs,
+                additional_authorized_imports=self.additional_authorized_imports,
+                use_structured_outputs_internally=self.use_structured_outputs_internally,
+                code_block_tags=self.code_block_tags,
+            )
+            if hasattr(agent, "__enter__") and hasattr(agent, "__exit__"):
+                agent = stack.enter_context(agent)
+            self._agent = agent
+            self._agent_stack = stack
+        except Exception:
+            stack.close()
+            raise
+
+    def preflight(self) -> None:
+        if self._preflight_done:
+            return
+        if self.executor_type == "docker":
+            self._preflight_docker()
+        self._preflight_done = True
+
+    def _preflight_docker(self) -> None:
+        try:
+            import docker
+            client = docker.from_env()
+            client.ping()
+            client.close()
+        except Exception as exc:
+            raise AgentRuntimeError(
+                status="sandbox_error",
+                message="Docker preflight failed: could not connect to Docker daemon",
+            ) from exc
+
+    def close(self) -> None:
+        stack = self._agent_stack
+        self._agent = None
+        self._agent_stack = None
+        if stack is not None:
+            stack.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            return
 
     def _load_mcp_tools(self, stack: ExitStack, mcp_client_cls: Any) -> List[Any]:
         tools_cfg = self.config.get("tools") or {}

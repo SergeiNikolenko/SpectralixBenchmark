@@ -10,12 +10,13 @@
 `exam-parser-pipeline.py` uses agent runtime by default:
 
 - Agent mode: `smolagents` + Docker sandbox
+- Structured repair mode: `PydanticAI` repairs malformed parser JSON when enabled
 - Fallback: legacy OpenAI direct call if agent runtime initialization fails
 
 ## Dependencies
 
 ```bash
-pip install -r scripts/parsing/requirements.txt
+uv sync
 ```
 
 ## Required Inputs
@@ -29,13 +30,15 @@ exam_data/exams/
 ## Parser Run
 
 ```bash
-python3 scripts/parsing/exam-parser-pipeline.py \
+uv run python scripts/parsing/exam-parser-pipeline.py \
   --agent-enabled true \
   --agent-max-steps 6 \
   --agent-config scripts/agents/agent_config.yaml \
   --model-marker gpt-4.1-mini \
   --openai-base-url "http://127.0.0.1:8317/v1" \
-  --api-key "ccs-internal-managed"
+  --api-key "ccs-internal-managed" \
+  --parser-structured-repair-enabled true \
+  --parser-structured-retries 2
 ```
 
 Environment:
@@ -60,7 +63,7 @@ Pipeline log:
 ## Flatten Parsed Output
 
 ```bash
-python3 scripts/parsing/benchmark_collection.py
+uv run python scripts/parsing/benchmark_collection.py
 ```
 
 Produces:
