@@ -26,6 +26,18 @@ DETERMINISTIC_TYPES = {
 }
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 FALSY_VALUES = {"0", "false", "no", "n", "off"}
+MODEL_LIMIT_ERROR_MARKERS = (
+    "insufficient_quota",
+    "quota exceeded",
+    "quota_exceeded",
+    "exceeded your current quota",
+    "billing hard limit",
+    "billing_limit_reached",
+    "out of credits",
+    "credits exhausted",
+    "monthly usage limit",
+    "rate limit exceeded permanently",
+)
 
 
 JUDGE_SYSTEM_PROMPT = """
@@ -45,6 +57,10 @@ Return ONLY valid JSON:
   "llm_comment": "<short justification>"
 }
 """.strip()
+
+
+class ModelLimitExceededError(RuntimeError):
+    pass
 
 
 def normalize_answer_type(answer_type: Optional[str]) -> str:
@@ -276,6 +292,129 @@ def _str_to_bool(value: str) -> bool:
     raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
 
 
+def _is_model_limit_error(error_message: str) -> bool:
+    text = str(error_message or "").strip().lower()
+    if not text:
+        return False
+    return any(marker in text for marker in MODEL_LIMIT_ERROR_MARKERS)
+
+
+def _raise_model_limit_exceeded(
+    *,
+    exc: Exception,
+    model_name: str,
+    key: str,
+    prefix: str,
+) -> None:
+    if not _is_model_limit_error(str(exc)):
+        return
+    raise ModelLimitExceededError(
+        f"{prefix}model={model_name}, key={key}, reason={str(exc)[:240]}"
+    ) from exc
+
+
+def _ensure_client(
+    *,
+    client: Optional[OpenAI],
+    judge_api_key: Optional[str],
+    judge_model_url: Optional[str],
+) -> OpenAI:
+    if client is not None:
+        return client
+    return OpenAI(
+        api_key=judge_api_key,
+        base_url=_resolve_judge_api_base(judge_model_url),
+    )
+
+
+def _build_llm_success_output(
+    *,
+    judge_input: Dict[str, Any],
+    judge_result: Dict[str, Any],
+    max_score: float,
+    model_name: str,
+    comment_suffix: str = "",
+) -> Dict[str, Any]:
+    return {
+        **judge_input,
+        "llm_score": judge_result["llm_score"],
+        "llm_comment": f"{judge_result['llm_comment']}{comment_suffix}",
+        "final_score": max_score * float(judge_result["llm_score"]),
+        "max_score": max_score,
+        "score_method": "llm_judge",
+        "judge_model": model_name,
+        "judge_request_id": judge_result.get("judge_request_id"),
+        "judge_latency_ms": judge_result.get("judge_latency_ms"),
+        "row_status": "ok",
+    }
+
+
+def _build_missing_canonical_output(student: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        **student,
+        "canonical_answer": None,
+        "llm_score": None,
+        "llm_comment": "Judging skipped: canonical answer not found",
+        "final_score": None,
+        "max_score": 0.0,
+        "score_method": None,
+        "row_status": "judge_error",
+    }
+
+
+def _build_technical_skip_output(
+    *,
+    judge_input: Dict[str, Any],
+    student_status: str,
+    max_score: float,
+) -> Dict[str, Any]:
+    return {
+        **judge_input,
+        "llm_score": None,
+        "llm_comment": f"Technical skip: student_status={student_status}",
+        "final_score": None,
+        "max_score": max_score,
+        "score_method": None,
+        "row_status": student_status,
+    }
+
+
+def _build_deterministic_output(
+    *,
+    judge_input: Dict[str, Any],
+    judge_result: Dict[str, Any],
+    max_score: float,
+) -> Dict[str, Any]:
+    return {
+        **judge_input,
+        "llm_score": judge_result["llm_score"],
+        "llm_comment": judge_result["llm_comment"],
+        "final_score": max_score * float(judge_result["llm_score"]),
+        "max_score": max_score,
+        "score_method": "deterministic",
+        "row_status": "ok",
+    }
+
+
+def _build_llm_error_output(
+    *,
+    judge_input: Dict[str, Any],
+    max_score: float,
+    model_name: str,
+    llm_comment: str,
+) -> Dict[str, Any]:
+    return {
+        **judge_input,
+        "llm_score": None,
+        "llm_comment": llm_comment,
+        "final_score": None,
+        "max_score": max_score,
+        "score_method": "llm_judge",
+        "judge_model": model_name,
+        "row_status": "judge_error",
+    }
+
+
 def _resolve_judge_api_base(model_url: Optional[str]) -> Optional[str]:
     if not model_url:
         return None
@@ -324,6 +463,33 @@ def _parse_max_score(gold_row: Dict[str, Any]) -> float:
         return 0.0
 
 
+def _call_legacy_judge(
+    *,
+    client: Optional[OpenAI],
+    judge_api_key: Optional[str],
+    judge_model_url: Optional[str],
+    model_name: str,
+    max_tokens: int,
+    temperature: float,
+    reasoning_effort: str,
+    judge_input: Dict[str, Any],
+) -> Tuple[Optional[OpenAI], Dict[str, Any]]:
+    resolved_client = _ensure_client(
+        client=client,
+        judge_api_key=judge_api_key,
+        judge_model_url=judge_model_url,
+    )
+    judge_result = call_llm_judge(
+        client=resolved_client,
+        model_name=model_name,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        reasoning_effort=reasoning_effort,
+        item=judge_input,
+    )
+    return resolved_client, judge_result
+
+
 def run_llm_judge(
     input_path: Path,
     gold_path: Path,
@@ -367,16 +533,7 @@ def run_llm_judge(
             gold_q = gold.get(key)
             if gold_q is None:
                 judge_error_count += 1
-                output = {
-                    **student,
-                    "canonical_answer": None,
-                    "llm_score": None,
-                    "llm_comment": "Judging skipped: canonical answer not found",
-                    "final_score": None,
-                    "max_score": 0.0,
-                    "score_method": None,
-                    "row_status": "judge_error",
-                }
+                output = _build_missing_canonical_output(student)
                 f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
                 continue
 
@@ -389,15 +546,11 @@ def run_llm_judge(
             student_status = str(student.get("student_status", "ok") or "ok")
             if student_status != "ok":
                 technical_skip_count += 1
-                output = {
-                    **judge_input,
-                    "llm_score": None,
-                    "llm_comment": f"Technical skip: student_status={student_status}",
-                    "final_score": None,
-                    "max_score": max_score,
-                    "score_method": None,
-                    "row_status": student_status,
-                }
+                output = _build_technical_skip_output(
+                    judge_input=judge_input,
+                    student_status=student_status,
+                    max_score=max_score,
+                )
                 f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
                 continue
 
@@ -410,16 +563,11 @@ def run_llm_judge(
                     student_answer=student.get("student_answer"),
                     canonical_answer=gold_q.get("canonical_answer"),
                 )
-                final_score = max_score * float(judge_result["llm_score"])
-                output = {
-                    **judge_input,
-                    "llm_score": judge_result["llm_score"],
-                    "llm_comment": judge_result["llm_comment"],
-                    "final_score": final_score,
-                    "max_score": max_score,
-                    "score_method": "deterministic",
-                    "row_status": "ok",
-                }
+                output = _build_deterministic_output(
+                    judge_input=judge_input,
+                    judge_result=judge_result,
+                    max_score=max_score,
+                )
                 f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
                 continue
 
@@ -437,88 +585,73 @@ def run_llm_judge(
                         reasoning_effort=reasoning_effort,
                     )
                 else:
-                    if client is None:
-                        client = OpenAI(
-                            api_key=judge_api_key,
-                            base_url=_resolve_judge_api_base(judge_model_url),
-                        )
-                    judge_result = call_llm_judge(
+                    client, judge_result = _call_legacy_judge(
                         client=client,
+                        judge_api_key=judge_api_key,
+                        judge_model_url=judge_model_url,
                         model_name=model_name,
                         max_tokens=max_tokens,
                         temperature=temperature,
                         reasoning_effort=reasoning_effort,
-                        item=judge_input,
+                        judge_input=judge_input,
                     )
-                final_score = max_score * float(judge_result["llm_score"])
-                output = {
-                    **judge_input,
-                    "llm_score": judge_result["llm_score"],
-                    "llm_comment": judge_result["llm_comment"],
-                    "final_score": final_score,
-                    "max_score": max_score,
-                    "score_method": "llm_judge",
-                    "judge_model": model_name,
-                    "judge_request_id": judge_result.get("judge_request_id"),
-                    "judge_latency_ms": judge_result.get("judge_latency_ms"),
-                    "row_status": "ok",
-                }
+                output = _build_llm_success_output(
+                    judge_input=judge_input,
+                    judge_result=judge_result,
+                    max_score=max_score,
+                    model_name=model_name,
+                )
             except Exception as exc:
+                _raise_model_limit_exceeded(
+                    exc=exc,
+                    model_name=model_name,
+                    key=key,
+                    prefix="Judge model limit exceeded; aborting run. ",
+                )
                 if judge_structured_enabled and judge_structured_fallback_legacy:
                     try:
-                        if client is None:
-                            client = OpenAI(
-                                api_key=judge_api_key,
-                                base_url=_resolve_judge_api_base(judge_model_url),
-                            )
-                        judge_result = call_llm_judge(
+                        client, judge_result = _call_legacy_judge(
                             client=client,
+                            judge_api_key=judge_api_key,
+                            judge_model_url=judge_model_url,
                             model_name=model_name,
                             max_tokens=max_tokens,
                             temperature=temperature,
                             reasoning_effort=reasoning_effort,
-                            item=judge_input,
+                            judge_input=judge_input,
                         )
-                        final_score = max_score * float(judge_result["llm_score"])
-                        output = {
-                            **judge_input,
-                            "llm_score": judge_result["llm_score"],
-                            "llm_comment": f"{judge_result['llm_comment']} (legacy_fallback)",
-                            "final_score": final_score,
-                            "max_score": max_score,
-                            "score_method": "llm_judge",
-                            "judge_model": model_name,
-                            "judge_request_id": judge_result.get("judge_request_id"),
-                            "judge_latency_ms": judge_result.get("judge_latency_ms"),
-                            "row_status": "ok",
-                        }
+                        output = _build_llm_success_output(
+                            judge_input=judge_input,
+                            judge_result=judge_result,
+                            max_score=max_score,
+                            model_name=model_name,
+                            comment_suffix=" (legacy_fallback)",
+                        )
                     except Exception as fallback_exc:
+                        _raise_model_limit_exceeded(
+                            exc=fallback_exc,
+                            model_name=model_name,
+                            key=key,
+                            prefix="Judge model limit exceeded during legacy fallback; aborting run. ",
+                        )
                         judge_error_count += 1
-                        output = {
-                            **judge_input,
-                            "llm_score": None,
-                            "llm_comment": (
+                        output = _build_llm_error_output(
+                            judge_input=judge_input,
+                            max_score=max_score,
+                            model_name=model_name,
+                            llm_comment=(
                                 f"Judging failed: {str(exc)[:160]}; "
                                 f"legacy fallback failed: {str(fallback_exc)[:160]}"
                             ),
-                            "final_score": None,
-                            "max_score": max_score,
-                            "score_method": "llm_judge",
-                            "judge_model": model_name,
-                            "row_status": "judge_error",
-                        }
+                        )
                 else:
                     judge_error_count += 1
-                    output = {
-                        **judge_input,
-                        "llm_score": None,
-                        "llm_comment": f"Judging failed: {str(exc)[:240]}",
-                        "final_score": None,
-                        "max_score": max_score,
-                        "score_method": "llm_judge",
-                        "judge_model": model_name,
-                        "row_status": "judge_error",
-                    }
+                    output = _build_llm_error_output(
+                        judge_input=judge_input,
+                        max_score=max_score,
+                        model_name=model_name,
+                        llm_comment=f"Judging failed: {str(exc)[:240]}",
+                    )
 
             f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
 

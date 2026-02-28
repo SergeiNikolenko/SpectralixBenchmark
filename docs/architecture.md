@@ -73,10 +73,11 @@
 ## Security Model
 
 - Sandbox: Docker (`executor_type=docker`)
-- Workspace mount: read-only
+- Workspace mount: disabled by default (`mount_workspace_readonly: false`)
 - Privilege drop: non-root, `cap_drop=ALL`, `no-new-privileges`
 - Tool policy:
   - shell/file-write tools disabled by default
+  - no benchmark lookup tool in default student profiles
   - container network disabled by default
   - outbound HTTP restricted by host allowlist
   - MCP disabled by default

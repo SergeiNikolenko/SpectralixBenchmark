@@ -26,7 +26,8 @@ Applies to:
 - `build_new_image: false` by default (rebuild only when explicitly required)
 
 3. Workspace policy
-- Mount repository into container as read-only.
+- Do not mount repository workspace by default.
+- If mount is explicitly required for debugging, use read-only mode only and never for benchmark scoring runs.
 - Do not expose write mounts for source code paths.
 
 4. Tool policy
@@ -34,6 +35,7 @@ Applies to:
 - `runtime.add_base_tools: true` enables built-in `web_search` and `visit_webpage` tools.
 - If strict no-web mode is required, set `runtime.add_base_tools: false`.
 - Enable only explicit allowlisted tools from `agent_config.yaml`.
+- Do not enable benchmark lookup tools during student evaluation.
 - External HTTP fetch is allowed only for `security.allowed_tool_hosts`.
 - Keep `security.allow_network_tools: false` unless external fetch tools are required.
 

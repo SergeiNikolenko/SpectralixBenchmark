@@ -12,6 +12,37 @@ from scripts.pydantic_guard.schemas import JudgeResult, ParsedQuestionSchema, St
 from scripts.pydantic_guard.student_guard import is_answer_invalid
 
 
+def _write_single_judge_case(input_path: Path, gold_path: Path) -> None:
+    student_row = {
+        "exam_id": "exam_1",
+        "page_id": "1",
+        "question_id": "1",
+        "question_type": "text",
+        "question_text": "Explain result",
+        "answer_type": "text",
+        "student_answer": "demo",
+        "student_status": "ok",
+        "student_error": "",
+        "student_elapsed_ms": 10,
+    }
+    gold_row = {
+        "exam_id": "exam_1",
+        "page_id": "1",
+        "question_id": "1",
+        "question_type": "text",
+        "question_text": "Explain result",
+        "answer_type": "text",
+        "canonical_answer": "expected",
+        "max_score": 5,
+    }
+    input_path.write_text(json.dumps(student_row) + "\n", encoding="utf-8")
+    gold_path.write_text(json.dumps(gold_row) + "\n", encoding="utf-8")
+
+
+def _read_jsonl(path: Path):
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
 class SchemaTests(unittest.TestCase):
     def test_judge_result_range_validation(self):
         with self.assertRaises(ValidationError):
@@ -70,32 +101,7 @@ class JudgeFallbackTests(unittest.TestCase):
             input_path = tmp / "student.jsonl"
             gold_path = tmp / "gold.jsonl"
             output_path = tmp / "judge.jsonl"
-
-            student_row = {
-                "exam_id": "exam_1",
-                "page_id": "1",
-                "question_id": "1",
-                "question_type": "text",
-                "question_text": "Explain result",
-                "answer_type": "text",
-                "student_answer": "demo",
-                "student_status": "ok",
-                "student_error": "",
-                "student_elapsed_ms": 10,
-            }
-            gold_row = {
-                "exam_id": "exam_1",
-                "page_id": "1",
-                "question_id": "1",
-                "question_type": "text",
-                "question_text": "Explain result",
-                "answer_type": "text",
-                "canonical_answer": "expected",
-                "max_score": 5,
-            }
-
-            input_path.write_text(json.dumps(student_row) + "\n", encoding="utf-8")
-            gold_path.write_text(json.dumps(gold_row) + "\n", encoding="utf-8")
+            _write_single_judge_case(input_path, gold_path)
 
             with mock.patch("scripts.evaluation.llm_judge.run_structured_judge", side_effect=RuntimeError("boom")):
                 with mock.patch(
@@ -120,11 +126,37 @@ class JudgeFallbackTests(unittest.TestCase):
                         judge_api_key="test-key",
                     )
 
-            rows = [json.loads(line) for line in output_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            rows = _read_jsonl(output_path)
             self.assertEqual(len(rows), 1)
             row = rows[0]
             self.assertEqual(row["row_status"], "ok")
             self.assertIn("legacy_fallback", row["llm_comment"])
+
+    def test_structured_quota_error_fails_fast(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            input_path = tmp / "student.jsonl"
+            gold_path = tmp / "gold.jsonl"
+            output_path = tmp / "judge.jsonl"
+            _write_single_judge_case(input_path, gold_path)
+
+            with mock.patch(
+                "scripts.evaluation.llm_judge.run_structured_judge",
+                side_effect=RuntimeError("insufficient_quota"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "limit exceeded"):
+                    run_llm_judge(
+                        input_path=input_path,
+                        gold_path=gold_path,
+                        output_path=output_path,
+                        model_name="judge-model",
+                        max_tokens=128,
+                        temperature=0.0,
+                        judge_structured_enabled=True,
+                        judge_structured_retries=1,
+                        judge_structured_fallback_legacy=False,
+                        judge_api_key="test-key",
+                    )
 
 
 if __name__ == "__main__":

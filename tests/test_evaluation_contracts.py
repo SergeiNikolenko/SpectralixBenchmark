@@ -21,6 +21,13 @@ EXPECTED_STUDENT_OUTPUT_KEYS = {
     "student_error",
     "student_elapsed_ms",
 }
+EXPECTED_TRACE_SECTIONS = (
+    "=== REASONING SUMMARY ===",
+    "=== STEP SUMMARY ===",
+    "=== AGENT STDOUT/STDERR TRACE ===",
+    "=== AGENT RUN DETAILS ===",
+    "=== RAW MODEL ANSWER ===",
+)
 
 
 class _FakeAgentRuntime:
@@ -46,6 +53,31 @@ class _FakeAgentRuntime:
 
     def close(self):
         return None
+
+    def get_last_run_details(self):
+        return {"state": "success", "steps": []}
+
+
+class _QuotaAgentRuntime:
+    def __init__(self, *args, **kwargs):
+        _ = args
+        _ = kwargs
+
+    def preflight(self):
+        return None
+
+    def solve_question(self, question):
+        _ = question
+        raise student_validation_module.AgentRuntimeError(
+            status="http_error",
+            message="Error code: 429 insufficient_quota",
+        )
+
+    def close(self):
+        return None
+
+    def get_last_run_details(self):
+        return {"state": "error", "steps": []}
 
 
 def _write_benchmark(path: Path) -> None:
@@ -81,6 +113,26 @@ def _read_jsonl(path: Path):
         return [json.loads(line) for line in f if line.strip()]
 
 
+def _run_student_inference(benchmark_path: Path, output_path: Path, **kwargs):
+    params = {
+        "benchmark_path": benchmark_path,
+        "output_path": output_path,
+        "model_url": "http://127.0.0.1:8317/v1",
+        "model_name": "test-model",
+        "api_key": "test-key",
+        "max_tokens": 128,
+        "temperature": 0.2,
+        "timeout": 15,
+        "max_retries": 1,
+    }
+    params.update(kwargs)
+    student_validation_module.run_benchmark_inference(**params)
+
+
+def _assert_student_output_row_contract(test_case: unittest.TestCase, row: dict) -> None:
+    test_case.assertEqual(set(row.keys()), EXPECTED_STUDENT_OUTPUT_KEYS)
+
+
 class StudentValidationContractTests(unittest.TestCase):
     def test_student_output_schema_stable(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -92,31 +144,58 @@ class StudentValidationContractTests(unittest.TestCase):
             with mock.patch.object(student_validation_module, "AgentRuntime", _FakeAgentRuntime):
                 _FakeAgentRuntime.preflight_calls = 0
                 _FakeAgentRuntime.solve_calls = 0
-                student_validation_module.run_benchmark_inference(
-                    benchmark_path=benchmark_path,
-                    output_path=output_path,
-                    model_url="http://127.0.0.1:8317/v1",
-                    model_name="test-model",
-                    api_key="test-key",
-                    max_tokens=128,
-                    temperature=0.2,
-                    timeout=15,
-                    max_retries=1,
-                )
+                _run_student_inference(benchmark_path, output_path)
 
             rows = _read_jsonl(output_path)
             self.assertEqual(len(rows), 2)
             self.assertEqual(_FakeAgentRuntime.preflight_calls, 1)
             self.assertEqual(_FakeAgentRuntime.solve_calls, 2)
             for row in rows:
-                self.assertEqual(set(row.keys()), EXPECTED_STUDENT_OUTPUT_KEYS)
+                _assert_student_output_row_contract(self, row)
                 self.assertEqual(row["student_status"], "ok")
 
             trace_files = sorted((tmp_path / "traces").glob("*.log"))
             self.assertEqual(len(trace_files), 2)
             trace_sample = trace_files[0].read_text(encoding="utf-8")
-            self.assertIn("=== AGENT STDOUT/STDERR TRACE ===", trace_sample)
-            self.assertIn("=== RAW MODEL ANSWER ===", trace_sample)
+            for marker in EXPECTED_TRACE_SECTIONS:
+                self.assertIn(marker, trace_sample)
+
+    def test_student_verbose_output_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            benchmark_path = tmp_path / "benchmark.jsonl"
+            output_path = tmp_path / "student_output.jsonl"
+            verbose_output_path = tmp_path / "student_output_verbose.jsonl"
+            _write_benchmark(benchmark_path)
+
+            with mock.patch.object(student_validation_module, "AgentRuntime", _FakeAgentRuntime):
+                _run_student_inference(
+                    benchmark_path,
+                    output_path,
+                    verbose_output_enabled=True,
+                    verbose_output_path=verbose_output_path,
+                    trace_log_enabled=False,
+                )
+
+            self.assertTrue(verbose_output_path.exists())
+            verbose_rows = _read_jsonl(verbose_output_path)
+            self.assertEqual(len(verbose_rows), 2)
+            for row in verbose_rows:
+                self.assertIn("raw_answer", row)
+                self.assertIn("reasoning_summary", row)
+                self.assertIn("agent_run_details", row)
+                self.assertIn("trace_log_path", row)
+
+    def test_student_run_fails_fast_on_model_limit(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            benchmark_path = tmp_path / "benchmark.jsonl"
+            output_path = tmp_path / "student_output.jsonl"
+            _write_benchmark(benchmark_path)
+
+            with mock.patch.object(student_validation_module, "AgentRuntime", _QuotaAgentRuntime):
+                with self.assertRaises(student_validation_module.ModelLimitExceededError):
+                    _run_student_inference(benchmark_path, output_path)
 
 
 class RunFullMatrixContractTests(unittest.TestCase):
@@ -229,7 +308,7 @@ class RunFullMatrixContractTests(unittest.TestCase):
             student_rows = _read_jsonl(student_output_path)
             self.assertEqual(len(student_rows), 2)
             for row in student_rows:
-                self.assertEqual(set(row.keys()), EXPECTED_STUDENT_OUTPUT_KEYS)
+                _assert_student_output_row_contract(self, row)
 
             judge_rows = _read_jsonl(judge_output_path)
             self.assertEqual(len(judge_rows), 2)

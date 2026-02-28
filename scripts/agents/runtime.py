@@ -96,11 +96,10 @@ class AgentRuntime:
         self._agent: Optional[Any] = None
         self._agent_stack: Optional[ExitStack] = None
         self._preflight_done = False
+        self._last_run_details: Optional[Dict[str, Any]] = None
 
     def solve_question(self, question: Dict[str, Any]) -> str:
         task = build_student_task(question)
-        if self.benchmark_path:
-            task += f"\n\nBenchmark path for optional lookup tool: {self.benchmark_path}"
         return self._run_agent_task(task=task)
 
     def parse_page(self, image_path: str, exam_id: str, page_id: int, marker_prompt: str) -> str:
@@ -187,6 +186,7 @@ class AgentRuntime:
             self._ensure_agent(CodeAgent, MCPClient)
             if self._agent is None:
                 raise AgentRuntimeError(status="parse_error", message="Agent runtime initialization failed")
+            self._last_run_details = None
             result = self._run_code_agent(agent=self._agent, task=task, images=images)
             return "" if result is None else str(result).strip()
 
@@ -203,8 +203,34 @@ class AgentRuntime:
                 os.environ["AGENT_ALLOWED_HOSTS"] = previous_hosts
 
     def _run_code_agent(self, agent: Any, task: str, images: Optional[List[Any]]) -> Any:
-        run_kwargs = {"task": task, "max_steps": self.max_steps, "images": images}
-        return agent.run(**run_kwargs)
+        run_kwargs = {
+            "task": task,
+            "max_steps": self.max_steps,
+            "images": images,
+            "return_full_result": True,
+        }
+        try:
+            result = agent.run(**run_kwargs)
+        except TypeError:
+            run_kwargs.pop("return_full_result", None)
+            result = agent.run(**run_kwargs)
+
+        if hasattr(result, "dict"):
+            try:
+                self._last_run_details = json.loads(
+                    json.dumps(result.dict(), ensure_ascii=False, default=str)
+                )
+            except Exception:
+                self._last_run_details = {"state": str(getattr(result, "state", "unknown"))}
+            return getattr(result, "output", None)
+
+        self._last_run_details = None
+        return result
+
+    def get_last_run_details(self) -> Optional[Dict[str, Any]]:
+        if self._last_run_details is None:
+            return None
+        return json.loads(json.dumps(self._last_run_details, ensure_ascii=False))
 
     def _ensure_agent(self, code_agent_cls: Any, mcp_client_cls: Any) -> None:
         if self._agent is not None:

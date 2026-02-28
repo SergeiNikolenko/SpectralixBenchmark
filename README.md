@@ -205,7 +205,9 @@ Default policy in `scripts/agents/agent_config.yaml`:
 - Internet tools are disabled (`security.allow_network_tools: false`)
 - `safe_http_get_tool` is not available unless network tools are explicitly enabled
 - Tool network access is host-allowlisted only (`security.allowed_tool_hosts`)
-- In Docker mode, workspace is mounted read-only
+- In Docker mode, workspace is not mounted by default (`mount_workspace_readonly: false`)
+- Student prompt excludes benchmark identifiers (`exam_id/page_id/question_id`)
+- `benchmark_lookup_tool` is excluded from default student tool profiles
 
 This means internet access is controlled, not unrestricted.
 
@@ -231,7 +233,7 @@ Code-first mode:
   - Enforces container restrictions
 - `--agent-sandbox local`:
   - Development fallback
-  - No container isolation
+  - No container isolation and weak benchmark integrity guarantees
   - Do not use for production benchmarking
 
 ## Troubleshooting

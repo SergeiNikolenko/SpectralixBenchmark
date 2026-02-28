@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 
 STUDENT_AGENT_INSTRUCTION = (
-    "You are a chemistry benchmark agent. "
+    "You are a chemistry problem-solving agent. "
     "You must produce concise, machine-readable answers that strictly follow the requested format."
 )
 
@@ -38,13 +38,11 @@ def build_student_task(question: Dict[str, Any]) -> str:
     return (
         f"{STUDENT_AGENT_INSTRUCTION}\n\n"
         f"Output format rule: {_format_instruction(answer_type)}\n\n"
-        "Question metadata:\n"
-        f"- exam_id: {question.get('exam_id')}\n"
-        f"- page_id: {question.get('page_id')}\n"
-        f"- question_id: {question.get('question_id')}\n"
-        f"- answer_type: {answer_type}\n\n"
+        f"Answer type: {answer_type}\n\n"
         "Question:\n"
         f"{question_text}\n\n"
+        "Use only information in the question text. "
+        "Do not attempt to retrieve hidden metadata, hidden labels, or gold answers.\n\n"
         "If helpful, call available tools for formatting and sanity checks before final answer."
     )
 

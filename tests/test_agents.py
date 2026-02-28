@@ -1,11 +1,14 @@
 import unittest
 import os
+import json
+import tempfile
 from pathlib import Path
 
 from scripts.agents.config import build_executor_kwargs, load_agent_config
 from scripts.agents.models import ensure_chat_completions_url, parse_model_url
+from scripts.agents.prompts import build_student_task
 from scripts.agents.runtime import AgentRuntime
-from scripts.agents.tool_registry import build_tools, safe_http_get_tool
+from scripts.agents.tool_registry import benchmark_lookup_tool, build_tools, safe_http_get_tool
 
 
 class ModelAdapterTests(unittest.TestCase):
@@ -46,6 +49,12 @@ class ToolPolicyTests(unittest.TestCase):
         tools = build_tools("full", config)
         tool_names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
         self.assertIn("safe_http_get_tool", tool_names)
+
+    def test_full_profile_does_not_include_benchmark_lookup(self):
+        config = load_agent_config(config_path=None)
+        tools = build_tools("full", config)
+        tool_names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
+        self.assertNotIn("benchmark_lookup_tool", tool_names)
 
     def test_safe_http_tool_disabled_when_network_tools_off(self):
         config = load_agent_config(config_path=None)
@@ -102,6 +111,7 @@ class ConfigTests(unittest.TestCase):
         self.assertNotIn("docker_port", kwargs)
         self.assertFalse(kwargs["build_new_image"])
         self.assertTrue(kwargs["container_run_kwargs"]["network_disabled"])
+        self.assertNotIn("volumes", kwargs["container_run_kwargs"])
 
     def test_network_tools_require_allowlist(self):
         with self.assertRaises(ValueError):
@@ -167,6 +177,55 @@ class RuntimeInitTests(unittest.TestCase):
             runtime.close()
         finally:
             config_path.unlink(missing_ok=True)
+
+
+class PromptSecurityTests(unittest.TestCase):
+    def test_student_prompt_hides_question_ids(self):
+        question = {
+            "exam_id": "exam_1",
+            "page_id": "9",
+            "question_id": "13",
+            "answer_type": "multiple_choice",
+            "question_text": "Select answers",
+        }
+        prompt = build_student_task(question)
+        self.assertNotIn("exam_id", prompt)
+        self.assertNotIn("page_id", prompt)
+        self.assertNotIn("question_id", prompt)
+        self.assertNotIn("Question metadata", prompt)
+        self.assertNotIn("benchmark", prompt.lower())
+
+
+class BenchmarkLookupRedactionTests(unittest.TestCase):
+    def test_benchmark_lookup_redacts_gold_fields(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            benchmark_path = Path(tmp_dir) / "benchmark.jsonl"
+            benchmark_path.write_text(
+                json.dumps(
+                    {
+                        "exam_id": "exam_1",
+                        "page_id": "9",
+                        "question_id": "13",
+                        "question_text": "Q",
+                        "answer_type": "text",
+                        "canonical_answer": "SECRET",
+                        "max_score": 7,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            payload = benchmark_lookup_tool(
+                benchmark_path=str(benchmark_path),
+                exam_id="exam_1",
+                page_id="9",
+                question_id="13",
+            )
+            parsed = json.loads(payload)
+            self.assertEqual(parsed.get("status"), "ok")
+            self.assertNotIn("canonical_answer", parsed.get("row", {}))
+            self.assertNotIn("max_score", parsed.get("row", {}))
 
 
 if __name__ == "__main__":

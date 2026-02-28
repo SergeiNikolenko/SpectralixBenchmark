@@ -48,7 +48,8 @@ def _normalize_sequence(text: str) -> str:
 @tool
 def benchmark_lookup_tool(benchmark_path: str, exam_id: str, page_id: str, question_id: str) -> str:
     """
-    Looks up benchmark entries and returns the matched question row as JSON.
+    Looks up benchmark entries and returns a sanitized question row as JSON.
+    Gold labels/answers and scoring metadata are always redacted.
 
     Args:
         benchmark_path: Path to benchmark JSONL file.
@@ -74,7 +75,24 @@ def benchmark_lookup_tool(benchmark_path: str, exam_id: str, page_id: str, quest
                 and str(row.get("page_id")) == target_page
                 and str(row.get("question_id")) == target_q
             ):
-                return json.dumps({"status": "ok", "row": row}, ensure_ascii=False)
+                redacted_keys = {
+                    "canonical_answer",
+                    "answer",
+                    "gold_answer",
+                    "expected_answer",
+                    "max_score",
+                    "rubric",
+                    "score_rubric",
+                }
+                sanitized = {k: v for k, v in row.items() if k not in redacted_keys}
+                return json.dumps(
+                    {
+                        "status": "ok",
+                        "row": sanitized,
+                        "redacted_fields": sorted(k for k in row.keys() if k in redacted_keys),
+                    },
+                    ensure_ascii=False,
+                )
 
     return json.dumps(
         {

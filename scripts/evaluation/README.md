@@ -15,6 +15,7 @@
 - `--agent-enabled false` is accepted only for CLI compatibility and falls back to agent runtime
 - Docker preflight runs once before row loop (fail-fast on sandbox issues)
 - Agent session is reused across questions within one run
+- Student prompt hides `exam_id/page_id/question_id`; only `question_text` + `answer_type` are passed to the model
 
 ## Dependencies
 
@@ -67,6 +68,13 @@ Tools profiles:
 - `minimal`: reduced helper set
 - `code_only`: no custom tools
 
+Leakage protection defaults:
+
+- `benchmark_lookup_tool` is not enabled in `minimal` or `full` profiles
+- Benchmark path is not passed to student agent tasks
+- Docker sandbox does not mount repository workspace by default (`mount_workspace_readonly: false`)
+- `--agent-sandbox local` is unsafe for benchmark integrity and should be used only for debugging
+
 Note:
 
 - Base smolagents tools are enabled by default via `runtime.add_base_tools: true`
@@ -84,13 +92,41 @@ Trace flags:
 
 - `--trace-log-enabled` (default: `true`)
 - `--trace-log-dir` (default: `<output-dir>/traces`)
+- `--verbose-output-enabled` (default: `false`)
+- `--verbose-output-path` (default: `<output-dir>/student_output_verbose.jsonl`)
 
 Per-question trace logs include:
 
+- best-effort reasoning summary:
+  - `thought` values per step
+  - provider reasoning summaries (when API returns them)
+  - total reasoning tokens (if exposed by provider)
+- human-readable step summary (`thought`, code block, tool calls, observations, errors)
+- compact `RunResult` payload (`state`, output preview, step summaries)
 - full agent stdout/stderr stream (tool calls, code execution steps, runtime errors)
 - raw model answer
 - normalized final answer
 - row metadata (`exam_id/page_id/question_id`, status, elapsed time)
+
+Note on reasoning visibility:
+
+- Hidden provider-side chain-of-thought is generally not exposed by model APIs.
+- Traces include observable reasoning artifacts only (steps, code, tool calls, observations, model-visible outputs).
+
+Verbose student output:
+
+- `student_output.jsonl` remains contract-stable for judge/matrix compatibility.
+- If you need "everything in JSONL", enable `--verbose-output-enabled true`.
+- This writes `student_output_verbose.jsonl` with additional fields:
+  - `raw_answer`
+  - `reasoning_summary`
+  - `agent_run_details` (compact)
+  - `trace_log_path`
+
+Fail-fast on model limits:
+
+- If provider returns quota/credits exhaustion (for example `insufficient_quota`, `billing_limit_reached`, `exceeded your current quota`), the run is aborted immediately.
+- This is enforced both in student stage and judge stage to avoid silently writing rows with repeated technical errors.
 
 ## Example: Local Proxy Run (5 rows)
 

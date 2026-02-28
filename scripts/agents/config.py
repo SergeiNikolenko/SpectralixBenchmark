@@ -45,6 +45,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
         "docker": {
             "image_name": "spectralix-smolagent-sandbox",
             "build_new_image": False,
+            "mount_workspace_readonly": False,
             "host": "127.0.0.1",
             "port": 8888,
             "container_run_kwargs": {
@@ -70,7 +71,6 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
                 "unit_convert_tool",
                 "rubric_hint_tool",
                 "json_array_validate_tool",
-                "benchmark_lookup_tool",
             ],
             "full": [
                 "chem_format_tool",
@@ -78,7 +78,6 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
                 "unit_convert_tool",
                 "rubric_hint_tool",
                 "json_array_validate_tool",
-                "benchmark_lookup_tool",
                 "safe_http_get_tool",
             ],
         },
@@ -279,8 +278,12 @@ def build_executor_kwargs(config: Dict[str, Any], workspace_dir: Path) -> Dict[s
         container_run_kwargs.setdefault(key, default_value)
 
     volumes = dict(container_run_kwargs.get("volumes") or {})
-    volumes[str(workspace_dir.resolve())] = {"bind": "/workspace", "mode": "ro"}
-    container_run_kwargs["volumes"] = volumes
+    if bool(docker_cfg.get("mount_workspace_readonly", False)):
+        volumes[str(workspace_dir.resolve())] = {"bind": "/workspace", "mode": "ro"}
+    if volumes:
+        container_run_kwargs["volumes"] = volumes
+    else:
+        container_run_kwargs.pop("volumes", None)
     if enforce_network_isolation:
         container_run_kwargs["network_disabled"] = not allow_network_tools
         if not allow_network_tools:
