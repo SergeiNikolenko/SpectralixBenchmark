@@ -91,13 +91,12 @@ If this fails, start your local proxy first (example command from your setup):
 ### 1) Student stage smoke run (5 rows)
 
 ```bash
-uv run python scripts/evaluation/student_validation.py \
+uv run python -m scripts.evaluation.student_validation \
   --benchmark-path benchmark/benchmark_v1_0.jsonl \
   --output-path scripts/evaluation/student_output.jsonl \
   --api-base-url "$API_BASE_URL" \
   --model-name "gpt-5-codex-mini" \
   --api-key "$CLIPROXY_API_KEY" \
-  --agent-enabled true \
   --agent-sandbox docker \
   --agent-tools-profile full \
   --student-guard-enabled true \
@@ -109,57 +108,31 @@ uv run python scripts/evaluation/student_validation.py \
 ### 2) Judge run
 
 ```bash
-uv run python scripts/evaluation/llm_judge.py \
+uv run python -m scripts.evaluation.llm_judge \
   --input-path scripts/evaluation/student_output.jsonl \
   --gold-path benchmark/benchmark_v1_0.jsonl \
   --judge-model "gpt-5-codex-mini" \
   --judge-model-url "$API_BASE_URL" \
   --judge-api-key "$CLIPROXY_API_KEY" \
-  --judge-structured-enabled true \
   --judge-structured-retries 2 \
-  --judge-structured-fallback-legacy true \
   --output-path scripts/evaluation/llm_judge_output.jsonl
 ```
 
 ### 3) Full matrix run
 
 ```bash
-uv run python scripts/evaluation/run_full_matrix.py \
+uv run python -m scripts.evaluation.run_full_matrix \
   --benchmark-path benchmark/benchmark_v1_0.jsonl \
   --api-base-url "$API_BASE_URL" \
   --api-key "$CLIPROXY_API_KEY" \
   --models gpt-5-codex-mini \
   --judge-model gpt-5-codex-mini \
-  --agent-enabled true \
   --agent-sandbox docker \
   --agent-tools-profile full \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
-  --judge-structured-enabled true \
-  --judge-structured-retries 2 \
-  --judge-structured-fallback-legacy true
-```
-
-Full matrix with open internet mode (unsafe):
-
-```bash
-uv run python scripts/evaluation/run_full_matrix.py \
-  --benchmark-path benchmark/benchmark_v1_0.jsonl \
-  --api-base-url "$API_BASE_URL" \
-  --api-key "$CLIPROXY_API_KEY" \
-  --models gpt-5-codex-mini \
-  --judge-model gpt-5-codex-mini \
-  --agent-config scripts/agents/agent_config_open_internet.yaml \
-  --agent-enabled true \
-  --agent-sandbox docker \
-  --agent-tools-profile full \
-  --student-guard-enabled true \
-  --student-guard-mode on_failure \
-  --student-guard-retries 2 \
-  --judge-structured-enabled true \
-  --judge-structured-retries 2 \
-  --judge-structured-fallback-legacy true
+  --judge-structured-retries 2
 ```
 
 Inspect latest run:
@@ -207,23 +180,8 @@ Default policy in `scripts/agents/agent_config.yaml`:
 - Tool network access is host-allowlisted only (`security.allowed_tool_hosts`)
 - In Docker mode, workspace is not mounted by default (`mount_workspace_readonly: false`)
 - Student prompt excludes benchmark identifiers (`exam_id/page_id/question_id`)
-- `benchmark_lookup_tool` is excluded from default student tool profiles
 
 This means internet access is controlled, not unrestricted.
-
-Open internet mode (unsafe):
-
-- Use config: `scripts/agents/agent_config_open_internet.yaml`
-- This enables `safe_http_get_tool` and removes host filtering via `*`
-- Use only for debugging; do not use for production benchmarking
-
-Code-first mode:
-
-- Use `--agent-tools-profile code_only`
-- In this profile no custom tools are exposed
-- With `runtime.add_base_tools: true`, built-in `web_search` and `visit_webpage` are still available
-- If you need strictly `python_interpreter` only, set `runtime.add_base_tools: false`
-- This is useful when you want code as the primary mechanism and avoid helper-tool bias
 
 ## Sandbox Modes
 

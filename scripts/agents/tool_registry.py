@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, List
 import json
 import re
@@ -43,69 +42,6 @@ def _normalize_sequence(text: str) -> str:
         if token:
             tokens.append(token)
     return "; ".join(tokens)
-
-
-@tool
-def benchmark_lookup_tool(benchmark_path: str, exam_id: str, page_id: str, question_id: str) -> str:
-    """
-    Looks up benchmark entries and returns a sanitized question row as JSON.
-    Gold labels/answers and scoring metadata are always redacted.
-
-    Args:
-        benchmark_path: Path to benchmark JSONL file.
-        exam_id: Exam identifier.
-        page_id: Page identifier.
-        question_id: Question identifier.
-    """
-    path = Path(benchmark_path)
-    if not path.exists():
-        return json.dumps({"status": "not_found", "reason": f"file_missing:{benchmark_path}"})
-
-    target_exam = str(exam_id)
-    target_page = str(page_id)
-    target_q = str(question_id)
-
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            if (
-                str(row.get("exam_id")) == target_exam
-                and str(row.get("page_id")) == target_page
-                and str(row.get("question_id")) == target_q
-            ):
-                redacted_keys = {
-                    "canonical_answer",
-                    "answer",
-                    "gold_answer",
-                    "expected_answer",
-                    "max_score",
-                    "rubric",
-                    "score_rubric",
-                }
-                sanitized = {k: v for k, v in row.items() if k not in redacted_keys}
-                return json.dumps(
-                    {
-                        "status": "ok",
-                        "row": sanitized,
-                        "redacted_fields": sorted(k for k in row.keys() if k in redacted_keys),
-                    },
-                    ensure_ascii=False,
-                )
-
-    return json.dumps(
-        {
-            "status": "not_found",
-            "reason": "row_not_found",
-            "lookup": {
-                "exam_id": target_exam,
-                "page_id": target_page,
-                "question_id": target_q,
-            },
-        },
-        ensure_ascii=False,
-    )
 
 
 @tool
@@ -318,7 +254,6 @@ def safe_http_get_tool(url: str, timeout_sec: int = 10) -> str:
 
 
 TOOL_REGISTRY = {
-    "benchmark_lookup_tool": benchmark_lookup_tool,
     "chem_format_tool": chem_format_tool,
     "smiles_sanity_tool": smiles_sanity_tool,
     "unit_convert_tool": unit_convert_tool,
@@ -336,8 +271,6 @@ def build_tools(profile: str, config: Dict[str, Any]) -> List[Any]:
     selected = profiles[profile]
     security = config.get("security") or {}
     has_allowed_hosts = bool(security.get("allowed_tool_hosts"))
-    allow_shell_tools = bool(security.get("allow_shell_tools", False))
-    allow_file_write_tools = bool(security.get("allow_file_write_tools", False))
     allow_network_tools = bool(security.get("allow_network_tools", False))
     tools: List[Any] = []
 
@@ -348,11 +281,6 @@ def build_tools(profile: str, config: Dict[str, Any]) -> List[Any]:
 
         if name == "safe_http_get_tool" and (not has_allowed_hosts or not allow_network_tools):
             # Keep tool disabled when allowlist is empty.
-            continue
-
-        if name.startswith("shell_") and not allow_shell_tools:
-            continue
-        if name.startswith("file_write_") and not allow_file_write_tools:
             continue
 
         tools.append(tool_obj)

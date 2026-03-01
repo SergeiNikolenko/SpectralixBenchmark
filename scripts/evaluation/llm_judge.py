@@ -1,20 +1,11 @@
 import argparse
 import json
 import re
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-import sys
 
-from openai import OpenAI
 from tqdm import tqdm
 
-# Ensure repository root is importable when script is run as a file.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from scripts.agents.models import parse_model_url
 from scripts.pydantic_guard.judge_structured import run_structured_judge
 
 DETERMINISTIC_TYPES = {
@@ -24,8 +15,6 @@ DETERMINISTIC_TYPES = {
     "numeric",
     "msms_structure_prediction",
 }
-TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
-FALSY_VALUES = {"0", "false", "no", "n", "off"}
 MODEL_LIMIT_ERROR_MARKERS = (
     "insufficient_quota",
     "quota exceeded",
@@ -38,25 +27,6 @@ MODEL_LIMIT_ERROR_MARKERS = (
     "monthly usage limit",
     "rate limit exceeded permanently",
 )
-
-
-JUDGE_SYSTEM_PROMPT = """
-You are an expert chemistry exam examiner.
-
-Your task is to evaluate a student's answer against the canonical answer.
-
-You MUST follow these rules strictly:
-- Do NOT help the student.
-- Do NOT explain chemistry theory.
-- Judge ONLY correctness and completeness.
-- Be strict and conservative.
-
-Return ONLY valid JSON:
-{
-  "llm_score": <float in [0, 1]>,
-  "llm_comment": "<short justification>"
-}
-""".strip()
 
 
 class ModelLimitExceededError(RuntimeError):
@@ -253,45 +223,6 @@ Student answer:
 """.strip()
 
 
-def parse_llm_judge_json(content: str) -> Dict[str, Any]:
-    raw = (content or "").strip()
-    if raw.startswith("```"):
-        raw = raw.strip("`")
-        raw = raw.replace("json\n", "", 1)
-
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-        if not match:
-            raise
-        parsed = json.loads(match.group(0))
-
-    if not isinstance(parsed, dict):
-        raise ValueError("Judge response must be a JSON object")
-    if "llm_score" not in parsed:
-        raise ValueError("Judge response missing 'llm_score'")
-    if "llm_comment" not in parsed:
-        parsed["llm_comment"] = ""
-
-    parsed["llm_score"] = float(parsed["llm_score"])
-    if parsed["llm_score"] < 0:
-        parsed["llm_score"] = 0.0
-    if parsed["llm_score"] > 1:
-        parsed["llm_score"] = 1.0
-    parsed["llm_comment"] = str(parsed["llm_comment"])
-    return parsed
-
-
-def _str_to_bool(value: str) -> bool:
-    normalized = (value or "").strip().lower()
-    if normalized in TRUTHY_VALUES:
-        return True
-    if normalized in FALSY_VALUES:
-        return False
-    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
-
-
 def _is_model_limit_error(error_message: str) -> bool:
     text = str(error_message or "").strip().lower()
     if not text:
@@ -313,32 +244,17 @@ def _raise_model_limit_exceeded(
     ) from exc
 
 
-def _ensure_client(
-    *,
-    client: Optional[OpenAI],
-    judge_api_key: Optional[str],
-    judge_model_url: Optional[str],
-) -> OpenAI:
-    if client is not None:
-        return client
-    return OpenAI(
-        api_key=judge_api_key,
-        base_url=_resolve_judge_api_base(judge_model_url),
-    )
-
-
 def _build_llm_success_output(
     *,
     judge_input: Dict[str, Any],
     judge_result: Dict[str, Any],
     max_score: float,
     model_name: str,
-    comment_suffix: str = "",
 ) -> Dict[str, Any]:
     return {
         **judge_input,
         "llm_score": judge_result["llm_score"],
-        "llm_comment": f"{judge_result['llm_comment']}{comment_suffix}",
+        "llm_comment": judge_result["llm_comment"],
         "final_score": max_score * float(judge_result["llm_score"]),
         "max_score": max_score,
         "score_method": "llm_judge",
@@ -415,79 +331,12 @@ def _build_llm_error_output(
     }
 
 
-def _resolve_judge_api_base(model_url: Optional[str]) -> Optional[str]:
-    if not model_url:
-        return None
-    api_base, _ = parse_model_url(model_url)
-    return api_base
-
-
-def call_llm_judge(
-    client: OpenAI,
-    model_name: str,
-    max_tokens: int,
-    temperature: float,
-    reasoning_effort: str,
-    item: Dict[str, Any],
-) -> Dict[str, Any]:
-    started_at = time.perf_counter()
-    response = client.chat.completions.create(
-        model=model_name,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        reasoning_effort=reasoning_effort,
-        messages=[
-            {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-            {"role": "user", "content": build_user_prompt(item)},
-        ],
-    )
-    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-
-    content = response.choices[0].message.content or ""
-    parsed = parse_llm_judge_json(content)
-
-    result = {
-        "llm_score": parsed["llm_score"],
-        "llm_comment": parsed["llm_comment"],
-        "judge_request_id": getattr(response, "id", None),
-        "judge_latency_ms": elapsed_ms,
-    }
-    return result
-
-
 def _parse_max_score(gold_row: Dict[str, Any]) -> float:
     value = gold_row.get("max_score", 0)
     try:
         return float(value)
     except (TypeError, ValueError):
         return 0.0
-
-
-def _call_legacy_judge(
-    *,
-    client: Optional[OpenAI],
-    judge_api_key: Optional[str],
-    judge_model_url: Optional[str],
-    model_name: str,
-    max_tokens: int,
-    temperature: float,
-    reasoning_effort: str,
-    judge_input: Dict[str, Any],
-) -> Tuple[Optional[OpenAI], Dict[str, Any]]:
-    resolved_client = _ensure_client(
-        client=client,
-        judge_api_key=judge_api_key,
-        judge_model_url=judge_model_url,
-    )
-    judge_result = call_llm_judge(
-        client=resolved_client,
-        model_name=model_name,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        reasoning_effort=reasoning_effort,
-        item=judge_input,
-    )
-    return resolved_client, judge_result
 
 
 def run_llm_judge(
@@ -498,9 +347,7 @@ def run_llm_judge(
     max_tokens: int,
     temperature: float,
     reasoning_effort: str = "high",
-    judge_structured_enabled: bool = True,
     judge_structured_retries: int = 2,
-    judge_structured_fallback_legacy: bool = True,
     judge_model_url: Optional[str] = None,
     judge_api_key: Optional[str] = None,
 ):
@@ -517,8 +364,6 @@ def run_llm_judge(
             row = json.loads(line)
             key = build_key(row)
             gold[key] = row
-
-    client: Optional[OpenAI] = None
 
     deterministic_count = 0
     llm_count = 0
@@ -573,28 +418,16 @@ def run_llm_judge(
 
             llm_count += 1
             try:
-                if judge_structured_enabled:
-                    judge_result = run_structured_judge(
-                        model_name=model_name,
-                        model_url=judge_model_url,
-                        api_key=judge_api_key,
-                        user_prompt=build_user_prompt(judge_input),
-                        retries=judge_structured_retries,
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                        reasoning_effort=reasoning_effort,
-                    )
-                else:
-                    client, judge_result = _call_legacy_judge(
-                        client=client,
-                        judge_api_key=judge_api_key,
-                        judge_model_url=judge_model_url,
-                        model_name=model_name,
-                        max_tokens=max_tokens,
-                        temperature=temperature,
-                        reasoning_effort=reasoning_effort,
-                        judge_input=judge_input,
-                    )
+                judge_result = run_structured_judge(
+                    model_name=model_name,
+                    model_url=judge_model_url,
+                    api_key=judge_api_key,
+                    user_prompt=build_user_prompt(judge_input),
+                    retries=judge_structured_retries,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    reasoning_effort=reasoning_effort,
+                )
                 output = _build_llm_success_output(
                     judge_input=judge_input,
                     judge_result=judge_result,
@@ -608,50 +441,13 @@ def run_llm_judge(
                     key=key,
                     prefix="Judge model limit exceeded; aborting run. ",
                 )
-                if judge_structured_enabled and judge_structured_fallback_legacy:
-                    try:
-                        client, judge_result = _call_legacy_judge(
-                            client=client,
-                            judge_api_key=judge_api_key,
-                            judge_model_url=judge_model_url,
-                            model_name=model_name,
-                            max_tokens=max_tokens,
-                            temperature=temperature,
-                            reasoning_effort=reasoning_effort,
-                            judge_input=judge_input,
-                        )
-                        output = _build_llm_success_output(
-                            judge_input=judge_input,
-                            judge_result=judge_result,
-                            max_score=max_score,
-                            model_name=model_name,
-                            comment_suffix=" (legacy_fallback)",
-                        )
-                    except Exception as fallback_exc:
-                        _raise_model_limit_exceeded(
-                            exc=fallback_exc,
-                            model_name=model_name,
-                            key=key,
-                            prefix="Judge model limit exceeded during legacy fallback; aborting run. ",
-                        )
-                        judge_error_count += 1
-                        output = _build_llm_error_output(
-                            judge_input=judge_input,
-                            max_score=max_score,
-                            model_name=model_name,
-                            llm_comment=(
-                                f"Judging failed: {str(exc)[:160]}; "
-                                f"legacy fallback failed: {str(fallback_exc)[:160]}"
-                            ),
-                        )
-                else:
-                    judge_error_count += 1
-                    output = _build_llm_error_output(
-                        judge_input=judge_input,
-                        max_score=max_score,
-                        model_name=model_name,
-                        llm_comment=f"Judging failed: {str(exc)[:240]}",
-                    )
+                judge_error_count += 1
+                output = _build_llm_error_output(
+                    judge_input=judge_input,
+                    max_score=max_score,
+                    model_name=model_name,
+                    llm_comment=f"Judging failed: {str(exc)[:240]}",
+                )
 
             f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
 
@@ -710,22 +506,10 @@ def parse_args() -> argparse.Namespace:
         help="Reasoning effort for judge model calls (default: high)",
     )
     parser.add_argument(
-        "--judge-structured-enabled",
-        type=_str_to_bool,
-        default=True,
-        help="Enable PydanticAI structured judge for non-deterministic types (default: true)",
-    )
-    parser.add_argument(
         "--judge-structured-retries",
         type=int,
         default=2,
         help="PydanticAI structured judge retries (default: 2)",
-    )
-    parser.add_argument(
-        "--judge-structured-fallback-legacy",
-        type=_str_to_bool,
-        default=True,
-        help="Fallback to legacy JSON judge parsing on structured failure (default: true)",
     )
     parser.add_argument(
         "--judge-model-url",
@@ -752,9 +536,7 @@ if __name__ == "__main__":
         max_tokens=args.max_tokens,
         temperature=args.temperature,
         reasoning_effort=args.reasoning_effort,
-        judge_structured_enabled=args.judge_structured_enabled,
         judge_structured_retries=args.judge_structured_retries,
-        judge_structured_fallback_legacy=args.judge_structured_fallback_legacy,
         judge_model_url=args.judge_model_url,
         judge_api_key=args.judge_api_key,
     )

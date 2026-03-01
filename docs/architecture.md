@@ -20,7 +20,6 @@
 - Joins student rows with canonical benchmark rows
 - Applies deterministic scoring where possible
 - Uses structured `PydanticAI` judge for non-deterministic types
-- Optionally falls back to legacy JSON parse for judge on structured failure
 - Writes `llm_judge_output.jsonl`
 
 3. `run_full_matrix.py`
@@ -77,7 +76,6 @@
 - Privilege drop: non-root, `cap_drop=ALL`, `no-new-privileges`
 - Tool policy:
   - shell/file-write tools disabled by default
-  - no benchmark lookup tool in default student profiles
   - container network disabled by default
   - outbound HTTP restricted by host allowlist
   - MCP disabled by default

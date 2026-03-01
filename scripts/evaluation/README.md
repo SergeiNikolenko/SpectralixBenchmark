@@ -12,7 +12,6 @@
 - Executes tool-capable agent with Docker sandbox
 - Controlled by `scripts/agents/agent_config.yaml`
 - Uses `scripts/pydantic_guard/*` for structured validation/repair on top of `smolagents`
-- `--agent-enabled false` is accepted only for CLI compatibility and falls back to agent runtime
 - Docker preflight runs once before row loop (fail-fast on sandbox issues)
 - Agent session is reused across questions within one run
 - Student prompt hides `exam_id/page_id/question_id`; only `question_text` + `answer_type` are passed to the model
@@ -56,7 +55,6 @@ Required:
 
 Agent flags:
 
-- `--agent-enabled` (default: `true`)
 - `--agent-max-steps` (default: `6`)
 - `--agent-sandbox` (default: `docker`)
 - `--agent-tools-profile` (default: `full`)
@@ -66,20 +64,14 @@ Tools profiles:
 
 - `full`: all allowlisted runtime tools
 - `minimal`: reduced helper set
-- `code_only`: no custom tools
 
 Leakage protection defaults:
 
-- `benchmark_lookup_tool` is not enabled in `minimal` or `full` profiles
 - Benchmark path is not passed to student agent tasks
 - Docker sandbox does not mount repository workspace by default (`mount_workspace_readonly: false`)
 - `--agent-sandbox local` is unsafe for benchmark integrity and should be used only for debugging
 
-Note:
-
-- Base smolagents tools are enabled by default via `runtime.add_base_tools: true`
-- This includes built-in `web_search` and `visit_webpage`
-- For strict python-only mode, set `runtime.add_base_tools: false` in agent config
+Base smolagents tools are enabled by default via `runtime.add_base_tools: true`.
 
 Student guard flags:
 
@@ -131,7 +123,7 @@ Fail-fast on model limits:
 ## Example: Local Proxy Run (5 rows)
 
 ```bash
-uv run python scripts/evaluation/student_validation.py \
+uv run python -m scripts.evaluation.student_validation \
   --benchmark-path benchmark/benchmark_v1_0.jsonl \
   --output-path scripts/evaluation/student_output.jsonl \
   --api-base-url "http://127.0.0.1:8317/v1" \
@@ -150,22 +142,18 @@ uv run python scripts/evaluation/student_validation.py \
 
 Judge structured flags:
 
-- `--judge-structured-enabled` (default: `true`)
 - `--judge-structured-retries` (default: `2`)
-- `--judge-structured-fallback-legacy` (default: `true`)
 - `--reasoning-effort` (`low|medium|high`, default: `high`)
 
 ```bash
-uv run python scripts/evaluation/llm_judge.py \
+uv run python -m scripts.evaluation.llm_judge \
   --input-path scripts/evaluation/student_output.jsonl \
   --gold-path benchmark/benchmark_v1_0.jsonl \
   --judge-model "gpt-5.3-codex-spark" \
   --reasoning-effort high \
   --judge-model-url "http://127.0.0.1:8317/v1" \
   --judge-api-key "ccs-internal-managed" \
-  --judge-structured-enabled true \
   --judge-structured-retries 2 \
-  --judge-structured-fallback-legacy true \
   --output-path scripts/evaluation/llm_judge_output.jsonl
 ```
 
@@ -175,22 +163,19 @@ uv run python scripts/evaluation/llm_judge.py \
 It also accepts `--api-base-url` as an alternative to `--model-url`.
 
 ```bash
-uv run python scripts/evaluation/run_full_matrix.py \
+uv run python -m scripts.evaluation.run_full_matrix \
   --benchmark-path benchmark/benchmark_v1_0.jsonl \
   --api-base-url "http://127.0.0.1:8317/v1" \
   --api-key "ccs-internal-managed" \
   --models gpt-5.3-codex-spark \
   --judge-model gpt-5.3-codex-spark \
-  --agent-enabled true \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
   --judge-reasoning-effort high \
   --trace-log-enabled true \
   --trace-log-dir runs/debug_traces \
-  --judge-structured-enabled true \
-  --judge-structured-retries 2 \
-  --judge-structured-fallback-legacy true
+  --judge-structured-retries 2
 ```
 
 ## Output Contracts

@@ -6,18 +6,10 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import sys
 
-# Ensure repository root is importable when script is run as a file.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-try:
-    from scripts.evaluation.student_validation import run_benchmark_inference
-except Exception:  # pragma: no cover - script execution fallback
-    from student_validation import run_benchmark_inference
 from scripts.agents.models import ensure_chat_completions_url
+from scripts.evaluation.llm_judge import run_llm_judge
+from scripts.evaluation.student_validation import run_benchmark_inference
 
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 MODEL_LIMIT_ERROR_MARKERS = (
@@ -326,18 +318,6 @@ def parse_args() -> argparse.Namespace:
         help="Run identifier; used as runs/<run-id> (default: timestamp)",
     )
     parser.add_argument(
-        "--max-tokens",
-        type=int,
-        default=256,
-        help="Student generation max tokens (default: 256)",
-    )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=0.5,
-        help="Student generation temperature (default: 0.5)",
-    )
-    parser.add_argument(
         "--timeout",
         type=int,
         default=120,
@@ -348,12 +328,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=3,
         help="Student request retry attempts (default: 3)",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=1,
-        help="Reserved for student inference parallelism tuning (default: 1)",
     )
     parser.add_argument(
         "--limit",
@@ -391,12 +365,6 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional API key override for student runtime",
-    )
-    parser.add_argument(
-        "--agent-enabled",
-        type=str,
-        default="true",
-        help="Enable smolagents runtime for student inference (true/false, default: true)",
     )
     parser.add_argument(
         "--agent-max-steps",
@@ -466,22 +434,10 @@ def parse_args() -> argparse.Namespace:
         help="Optional base directory for per-model verbose JSONL outputs",
     )
     parser.add_argument(
-        "--judge-structured-enabled",
-        type=str,
-        default="true",
-        help="Enable structured PydanticAI judge (true/false, default: true)",
-    )
-    parser.add_argument(
         "--judge-structured-retries",
         type=int,
         default=2,
         help="Structured judge retries (default: 2)",
-    )
-    parser.add_argument(
-        "--judge-structured-fallback-legacy",
-        type=str,
-        default="true",
-        help="Fallback to legacy JSON judge parser on structured failure (true/false, default: true)",
     )
     parser.add_argument(
         "--judge-model-url",
@@ -501,12 +457,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     try:
-        from llm_judge import run_llm_judge
-    except ImportError as exc:
-        raise SystemExit(
-            "[ERROR] Missing dependency for judge stage. Install with: pip install openai"
-        ) from exc
-    try:
         model_url = _resolve_model_url(args.model_url, args.api_base_url)
     except ValueError as exc:
         raise SystemExit(f"[ERROR] {exc}") from exc
@@ -515,12 +465,9 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
 
     summary_rows: List[Dict[str, Any]] = []
-    agent_enabled = _is_truthy(args.agent_enabled)
     student_guard_enabled = _is_truthy(args.student_guard_enabled)
     trace_log_enabled = _is_truthy(args.trace_log_enabled)
     verbose_output_enabled = _is_truthy(args.verbose_output_enabled)
-    judge_structured_enabled = _is_truthy(args.judge_structured_enabled)
-    judge_structured_fallback_legacy = _is_truthy(args.judge_structured_fallback_legacy)
 
     for model_name in args.student_models:
         model_slug = sanitize_model_name(model_name)
@@ -547,13 +494,9 @@ def main() -> None:
                 model_url=model_url,
                 model_name=model_name,
                 api_key=args.api_key,
-                max_tokens=args.max_tokens,
-                temperature=args.temperature,
                 timeout=args.timeout,
                 max_retries=args.max_retries,
                 limit=args.limit,
-                workers=args.workers,
-                agent_enabled=agent_enabled,
                 agent_max_steps=args.agent_max_steps,
                 agent_sandbox=args.agent_sandbox,
                 agent_tools_profile=args.agent_tools_profile,
@@ -600,9 +543,7 @@ def main() -> None:
                 max_tokens=args.judge_max_tokens,
                 temperature=args.judge_temperature,
                 reasoning_effort=args.judge_reasoning_effort,
-                judge_structured_enabled=judge_structured_enabled,
                 judge_structured_retries=args.judge_structured_retries,
-                judge_structured_fallback_legacy=judge_structured_fallback_legacy,
                 judge_model_url=args.judge_model_url,
                 judge_api_key=args.judge_api_key or args.api_key,
             )

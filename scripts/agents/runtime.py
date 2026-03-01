@@ -31,7 +31,6 @@ class AgentRuntime:
         model_url: str,
         model_name: str,
         *,
-        benchmark_path: Optional[Path] = None,
         api_key: Optional[str] = None,
         config_path: Optional[Path] = None,
         max_steps: int = 6,
@@ -41,7 +40,6 @@ class AgentRuntime:
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.workspace_dir = Path(__file__).resolve().parents[2]
-        self.benchmark_path = Path(benchmark_path).resolve() if benchmark_path else None
         self.max_steps = max(1, int(max_steps))
         self.timeout_sec = max(1, int(timeout_sec))
         self.tools_profile = tools_profile

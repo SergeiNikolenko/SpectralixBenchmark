@@ -1,14 +1,12 @@
 import unittest
 import os
-import json
-import tempfile
 from pathlib import Path
 
 from scripts.agents.config import build_executor_kwargs, load_agent_config
 from scripts.agents.models import ensure_chat_completions_url, parse_model_url
 from scripts.agents.prompts import build_student_task
 from scripts.agents.runtime import AgentRuntime
-from scripts.agents.tool_registry import benchmark_lookup_tool, build_tools, safe_http_get_tool
+from scripts.agents.tool_registry import build_tools, safe_http_get_tool
 
 
 class ModelAdapterTests(unittest.TestCase):
@@ -30,11 +28,6 @@ class ModelAdapterTests(unittest.TestCase):
 
 
 class ToolPolicyTests(unittest.TestCase):
-    def test_code_only_profile_has_no_custom_tools(self):
-        config = load_agent_config(config_path=None)
-        tools = build_tools("code_only", config)
-        self.assertEqual(tools, [])
-
     def test_safe_http_tool_disabled_without_allowlist(self):
         config = load_agent_config(config_path=None)
         config["security"]["allowed_tool_hosts"] = []
@@ -50,11 +43,12 @@ class ToolPolicyTests(unittest.TestCase):
         tool_names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
         self.assertIn("safe_http_get_tool", tool_names)
 
-    def test_full_profile_does_not_include_benchmark_lookup(self):
+    def test_full_profile_tools_are_expected(self):
         config = load_agent_config(config_path=None)
         tools = build_tools("full", config)
         tool_names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
-        self.assertNotIn("benchmark_lookup_tool", tool_names)
+        self.assertIn("chem_format_tool", tool_names)
+        self.assertIn("smiles_sanity_tool", tool_names)
 
     def test_safe_http_tool_disabled_when_network_tools_off(self):
         config = load_agent_config(config_path=None)
@@ -194,38 +188,6 @@ class PromptSecurityTests(unittest.TestCase):
         self.assertNotIn("question_id", prompt)
         self.assertNotIn("Question metadata", prompt)
         self.assertNotIn("benchmark", prompt.lower())
-
-
-class BenchmarkLookupRedactionTests(unittest.TestCase):
-    def test_benchmark_lookup_redacts_gold_fields(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            benchmark_path = Path(tmp_dir) / "benchmark.jsonl"
-            benchmark_path.write_text(
-                json.dumps(
-                    {
-                        "exam_id": "exam_1",
-                        "page_id": "9",
-                        "question_id": "13",
-                        "question_text": "Q",
-                        "answer_type": "text",
-                        "canonical_answer": "SECRET",
-                        "max_score": 7,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            payload = benchmark_lookup_tool(
-                benchmark_path=str(benchmark_path),
-                exam_id="exam_1",
-                page_id="9",
-                question_id="13",
-            )
-            parsed = json.loads(payload)
-            self.assertEqual(parsed.get("status"), "ok")
-            self.assertNotIn("canonical_answer", parsed.get("row", {}))
-            self.assertNotIn("max_score", parsed.get("row", {}))
 
 
 if __name__ == "__main__":

@@ -1,7 +1,6 @@
 import json
 import sys
 import tempfile
-import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -120,8 +119,6 @@ def _run_student_inference(benchmark_path: Path, output_path: Path, **kwargs):
         "model_url": "http://127.0.0.1:8317/v1",
         "model_name": "test-model",
         "api_key": "test-key",
-        "max_tokens": 128,
-        "temperature": 0.2,
         "timeout": 15,
         "max_retries": 1,
     }
@@ -266,15 +263,16 @@ class RunFullMatrixContractTests(unittest.TestCase):
                         )
                         f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
-            fake_llm_judge_module = types.ModuleType("llm_judge")
-            fake_llm_judge_module.run_llm_judge = fake_run_llm_judge
-
             with mock.patch.object(
                 run_full_matrix_module,
                 "run_benchmark_inference",
                 side_effect=fake_run_benchmark_inference,
             ):
-                with mock.patch.dict(sys.modules, {"llm_judge": fake_llm_judge_module}):
+                with mock.patch.object(
+                    run_full_matrix_module,
+                    "run_llm_judge",
+                    side_effect=fake_run_llm_judge,
+                ):
                     with mock.patch.object(
                         sys,
                         "argv",

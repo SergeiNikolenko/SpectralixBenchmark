@@ -94,44 +94,7 @@ class JudgeDeterministicTests(unittest.TestCase):
         self.assertEqual(result["llm_score"], 1.0)
 
 
-class JudgeFallbackTests(unittest.TestCase):
-    def test_structured_failure_falls_back_to_legacy(self):
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            tmp = Path(tmp_dir)
-            input_path = tmp / "student.jsonl"
-            gold_path = tmp / "gold.jsonl"
-            output_path = tmp / "judge.jsonl"
-            _write_single_judge_case(input_path, gold_path)
-
-            with mock.patch("scripts.evaluation.llm_judge.run_structured_judge", side_effect=RuntimeError("boom")):
-                with mock.patch(
-                    "scripts.evaluation.llm_judge.call_llm_judge",
-                    return_value={
-                        "llm_score": 0.5,
-                        "llm_comment": "legacy path",
-                        "judge_request_id": "r1",
-                        "judge_latency_ms": 1,
-                    },
-                ):
-                    run_llm_judge(
-                        input_path=input_path,
-                        gold_path=gold_path,
-                        output_path=output_path,
-                        model_name="judge-model",
-                        max_tokens=128,
-                        temperature=0.0,
-                        judge_structured_enabled=True,
-                        judge_structured_retries=1,
-                        judge_structured_fallback_legacy=True,
-                        judge_api_key="test-key",
-                    )
-
-            rows = _read_jsonl(output_path)
-            self.assertEqual(len(rows), 1)
-            row = rows[0]
-            self.assertEqual(row["row_status"], "ok")
-            self.assertIn("legacy_fallback", row["llm_comment"])
-
+class JudgeStructuredTests(unittest.TestCase):
     def test_structured_quota_error_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
@@ -152,9 +115,7 @@ class JudgeFallbackTests(unittest.TestCase):
                         model_name="judge-model",
                         max_tokens=128,
                         temperature=0.0,
-                        judge_structured_enabled=True,
                         judge_structured_retries=1,
-                        judge_structured_fallback_legacy=False,
                         judge_api_key="test-key",
                     )
 

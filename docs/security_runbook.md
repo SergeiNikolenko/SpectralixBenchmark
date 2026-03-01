@@ -35,7 +35,6 @@ Applies to:
 - `runtime.add_base_tools: true` enables built-in `web_search` and `visit_webpage` tools.
 - If strict no-web mode is required, set `runtime.add_base_tools: false`.
 - Enable only explicit allowlisted tools from `agent_config.yaml`.
-- Do not enable benchmark lookup tools during student evaluation.
 - External HTTP fetch is allowed only for `security.allowed_tool_hosts`.
 - Keep `security.allow_network_tools: false` unless external fetch tools are required.
 
@@ -62,7 +61,7 @@ The runtime performs Docker preflight once before benchmark loop and fails fast 
 Quick smoke test:
 
 ```bash
-uv run python scripts/evaluation/student_validation.py \
+uv run python -m scripts.evaluation.student_validation \
   --benchmark-path benchmark/benchmark_v1_0.jsonl \
   --output-path scripts/evaluation/student_output_smoke.jsonl \
   --api-base-url "http://127.0.0.1:8317/v1" \

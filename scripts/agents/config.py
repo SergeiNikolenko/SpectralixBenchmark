@@ -35,8 +35,6 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
     },
     "security": {
         "allowed_tool_hosts": [],
-        "allow_shell_tools": False,
-        "allow_file_write_tools": False,
         "allow_network_tools": False,
         "enforce_container_network_isolation": True,
     },
@@ -64,7 +62,6 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
     },
     "tools": {
         "profiles": {
-            "code_only": [],
             "minimal": [
                 "chem_format_tool",
                 "smiles_sanity_tool",
@@ -86,27 +83,10 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
             "servers": [],
         },
     },
-    "pydantic_guard": {
-        "student": {
-            "enabled": True,
-            "mode": "on_failure",
-            "retries": 2,
-        },
-        "judge": {
-            "enabled": True,
-            "retries": 2,
-            "fallback_legacy": True,
-        },
-        "parser": {
-            "enabled": True,
-            "retries": 2,
-        },
-    },
 }
 
-REQUIRED_CONFIG_SECTIONS = ("model", "runtime", "security", "sandbox", "tools", "pydantic_guard")
-SUPPORTED_EXECUTORS = {"local", "blaxel", "e2b", "modal", "docker", "wasm"}
-SUPPORTED_STUDENT_GUARD_MODES = {"on_failure", "always", "off"}
+REQUIRED_CONFIG_SECTIONS = ("model", "runtime", "security", "sandbox", "tools")
+SUPPORTED_EXECUTORS = {"local", "docker"}
 SUPPORTED_REASONING_EFFORTS = {"low", "medium", "high"}
 
 
@@ -214,33 +194,6 @@ def validate_agent_config(config: Dict[str, Any]) -> Dict[str, Any]:
     servers = mcp_cfg.get("servers", [])
     if not isinstance(servers, list):
         raise ValueError("Agent config tools.mcp.servers must be a list")
-
-    guard_cfg = _require_mapping(config, "pydantic_guard")
-    student_guard = _require_mapping(guard_cfg, "student")
-    judge_guard = _require_mapping(guard_cfg, "judge")
-    parser_guard = _require_mapping(guard_cfg, "parser")
-
-    if not isinstance(student_guard.get("enabled"), bool):
-        raise ValueError("Agent config pydantic_guard.student.enabled must be a boolean")
-    student_mode = str(student_guard.get("mode") or "").strip().lower()
-    if student_mode not in SUPPORTED_STUDENT_GUARD_MODES:
-        raise ValueError(
-            f"Agent config pydantic_guard.student.mode must be one of {sorted(SUPPORTED_STUDENT_GUARD_MODES)}"
-        )
-    if int(student_guard.get("retries", 0)) < 0:
-        raise ValueError("Agent config pydantic_guard.student.retries must be >= 0")
-
-    if not isinstance(judge_guard.get("enabled"), bool):
-        raise ValueError("Agent config pydantic_guard.judge.enabled must be a boolean")
-    if int(judge_guard.get("retries", 0)) < 0:
-        raise ValueError("Agent config pydantic_guard.judge.retries must be >= 0")
-    if not isinstance(judge_guard.get("fallback_legacy"), bool):
-        raise ValueError("Agent config pydantic_guard.judge.fallback_legacy must be a boolean")
-
-    if not isinstance(parser_guard.get("enabled"), bool):
-        raise ValueError("Agent config pydantic_guard.parser.enabled must be a boolean")
-    if int(parser_guard.get("retries", 0)) < 0:
-        raise ValueError("Agent config pydantic_guard.parser.retries must be >= 0")
 
     return config
 

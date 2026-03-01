@@ -10,11 +10,6 @@ import sys
 
 from tqdm import tqdm
 
-# Ensure repository root is importable when script is run as a file.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from scripts.agents import AgentRuntime, AgentRuntimeError
 from scripts.agents.models import ensure_chat_completions_url
 from scripts.pydantic_guard.student_guard import is_answer_invalid, run_student_guard
@@ -613,15 +608,11 @@ def run_benchmark_inference(
     output_path: Path,
     model_url: str,
     model_name: str,
-    max_tokens: int,
-    temperature: float,
     timeout: int,
     max_retries: int = 3,
     max_error_len: int = 240,
     limit: Optional[int] = None,
-    workers: int = 1,
     *,
-    agent_enabled: bool = True,
     agent_max_steps: int = 6,
     agent_sandbox: str = "docker",
     agent_tools_profile: str = "full",
@@ -636,25 +627,14 @@ def run_benchmark_inference(
     verbose_output_enabled: bool = False,
     verbose_output_path: Optional[Path] = None,
 ):
-    _ = max_tokens
-    _ = temperature
-
     questions = load_benchmark_questions(benchmark_path=benchmark_path)
     if limit is not None and limit >= 0:
         questions = questions[:limit]
-    if workers != 1:
-        tqdm.write(
-            f"workers={workers} requested; running in sequential mode in this script version."
-        )
-
-    if not agent_enabled:
-        tqdm.write("agent_enabled=false is deprecated; legacy backend was removed. Using agent runtime.")
 
     try:
         runtime = AgentRuntime(
             model_url=model_url,
             model_name=model_name,
-            benchmark_path=benchmark_path,
             api_key=api_key,
             config_path=agent_config,
             max_steps=agent_max_steps,
@@ -857,18 +837,6 @@ if __name__ == "__main__":
         help="Optional API key override for agent runtime",
     )
     parser.add_argument(
-        "--max-tokens",
-        type=int,
-        default=256,
-        help="Maximum number of tokens in the response (kept for CLI compatibility)",
-    )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=0.5,
-        help="Temperature for sampling (kept for CLI compatibility)",
-    )
-    parser.add_argument(
         "--timeout",
         type=int,
         default=120,
@@ -891,19 +859,6 @@ if __name__ == "__main__":
         type=int,
         default=None,
         help="Optional limit of rows",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=1,
-        help="Reserved for parallel execution tuning (default: 1)",
-    )
-
-    parser.add_argument(
-        "--agent-enabled",
-        type=_str_to_bool,
-        default=True,
-        help="Enable agent runtime (default: true; false is accepted for compatibility)",
     )
     parser.add_argument(
         "--agent-max-steps",
@@ -994,14 +949,10 @@ if __name__ == "__main__":
             model_url=resolved_model_url,
             model_name=args.model_name,
             api_key=args.api_key,
-            max_tokens=args.max_tokens,
-            temperature=args.temperature,
             timeout=args.timeout,
             max_retries=args.max_retries,
             max_error_len=args.max_error_len,
             limit=args.limit,
-            workers=args.workers,
-            agent_enabled=args.agent_enabled,
             agent_max_steps=args.agent_max_steps,
             agent_sandbox=args.agent_sandbox,
             agent_tools_profile=args.agent_tools_profile,

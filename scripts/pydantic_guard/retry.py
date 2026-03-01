@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Iterable, TypeVar
+from typing import Callable, TypeVar
 import time
 
 T = TypeVar("T")
