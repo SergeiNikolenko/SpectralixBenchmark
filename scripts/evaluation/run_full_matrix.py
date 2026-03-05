@@ -546,6 +546,8 @@ def main() -> None:
                 judge_structured_retries=args.judge_structured_retries,
                 judge_model_url=args.judge_model_url,
                 judge_api_key=args.judge_api_key or args.api_key,
+                trace_log_enabled=trace_log_enabled,
+                trace_log_dir=trace_log_dir,
             )
         except Exception as exc:
             _raise_model_limit_exit(

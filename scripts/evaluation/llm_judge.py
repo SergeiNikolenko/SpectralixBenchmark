@@ -15,6 +15,8 @@ DETERMINISTIC_TYPES = {
     "numeric",
     "msms_structure_prediction",
 }
+TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
+FALSY_VALUES = {"0", "false", "no", "n", "off"}
 MODEL_LIMIT_ERROR_MARKERS = (
     "insufficient_quota",
     "quota exceeded",
@@ -339,6 +341,74 @@ def _parse_max_score(gold_row: Dict[str, Any]) -> float:
         return 0.0
 
 
+def _slug_for_filename(value: Any, fallback: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        text = fallback
+    text = re.sub(r"[^a-zA-Z0-9._-]+", "_", text).strip("._-")
+    return text or fallback
+
+
+def _build_trace_log_path(trace_log_dir: Path, item: Dict[str, Any], line_idx: int) -> Path:
+    exam_id = _slug_for_filename(item.get("exam_id"), "exam")
+    page_id = _slug_for_filename(item.get("page_id"), "page")
+    question_id = _slug_for_filename(item.get("question_id"), f"line_{line_idx}")
+    return trace_log_dir / f"{line_idx:04d}_{exam_id}_p{page_id}_q{question_id}.log"
+
+
+def _truncate_text(value: Any, limit: int = 500) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\s+", " ", text)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 3)] + "..."
+
+
+def _append_judge_trace(
+    *,
+    trace_log_path: Path,
+    line_idx: int,
+    judge_mode: str,
+    judge_input: Dict[str, Any],
+    judge_output: Dict[str, Any],
+) -> None:
+    trace_payload = {
+        "line_idx": line_idx,
+        "judge_mode": judge_mode,
+        "row_status": judge_output.get("row_status"),
+        "score_method": judge_output.get("score_method"),
+        "judge_model": judge_output.get("judge_model"),
+        "llm_score": judge_output.get("llm_score"),
+        "final_score": judge_output.get("final_score"),
+        "max_score": judge_output.get("max_score"),
+        "judge_latency_ms": judge_output.get("judge_latency_ms"),
+        "judge_request_id": judge_output.get("judge_request_id"),
+        "llm_comment": judge_output.get("llm_comment"),
+    }
+    input_snapshot = {
+        "answer_type": judge_input.get("answer_type"),
+        "question_text_preview": _truncate_text(judge_input.get("question_text"), limit=400),
+        "student_answer_preview": _truncate_text(judge_input.get("student_answer"), limit=300),
+        "canonical_answer_preview": _truncate_text(judge_input.get("canonical_answer"), limit=300),
+    }
+    with trace_log_path.open("a", encoding="utf-8") as f:
+        f.write(
+            "\n=== JUDGE RESULT ===\n"
+            f"{json.dumps(trace_payload, ensure_ascii=False, indent=2)}\n\n"
+            "=== JUDGE INPUT SNAPSHOT ===\n"
+            f"{json.dumps(input_snapshot, ensure_ascii=False, indent=2)}\n"
+        )
+
+
+def _str_to_bool(value: str) -> bool:
+    normalized = (value or "").strip().lower()
+    if normalized in TRUTHY_VALUES:
+        return True
+    if normalized in FALSY_VALUES:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
+
+
 def run_llm_judge(
     input_path: Path,
     gold_path: Path,
@@ -350,6 +420,8 @@ def run_llm_judge(
     judge_structured_retries: int = 2,
     judge_model_url: Optional[str] = None,
     judge_api_key: Optional[str] = None,
+    trace_log_enabled: bool = False,
+    trace_log_dir: Optional[Path] = None,
 ):
     if not input_path.exists():
         raise FileNotFoundError(f"Student output file not found: {input_path}")
@@ -357,6 +429,9 @@ def run_llm_judge(
         raise FileNotFoundError(f"Gold benchmark file not found: {gold_path}")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_trace_log_dir = trace_log_dir or (output_path.parent / "traces")
+    if trace_log_enabled:
+        resolved_trace_log_dir.mkdir(parents=True, exist_ok=True)
 
     gold: Dict[str, Dict[str, Any]] = {}
     with gold_path.open("r", encoding="utf-8") as f:
@@ -371,85 +446,99 @@ def run_llm_judge(
     judge_error_count = 0
 
     with input_path.open("r", encoding="utf-8") as f_in, output_path.open("w", encoding="utf-8") as f_out:
-        for line in tqdm(f_in, desc="Judging answers"):
+        for line_idx, line in enumerate(tqdm(f_in, desc="Judging answers"), start=1):
             student = json.loads(line)
             key = build_key(student)
+            judge_mode = "unknown"
 
             gold_q = gold.get(key)
             if gold_q is None:
                 judge_error_count += 1
+                judge_mode = "missing_canonical"
+                judge_input = {
+                    **student,
+                    "canonical_answer": None,
+                }
                 output = _build_missing_canonical_output(student)
-                f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
-                continue
+            else:
+                max_score = _parse_max_score(gold_q)
+                judge_input = {
+                    **student,
+                    "canonical_answer": gold_q.get("canonical_answer"),
+                }
 
-            max_score = _parse_max_score(gold_q)
-            judge_input = {
-                **student,
-                "canonical_answer": gold_q.get("canonical_answer"),
-            }
+                student_status = str(student.get("student_status", "ok") or "ok")
+                if student_status != "ok":
+                    technical_skip_count += 1
+                    judge_mode = "technical_skip"
+                    output = _build_technical_skip_output(
+                        judge_input=judge_input,
+                        student_status=student_status,
+                        max_score=max_score,
+                    )
+                else:
+                    answer_type = normalize_answer_type(student.get("answer_type"))
 
-            student_status = str(student.get("student_status", "ok") or "ok")
-            if student_status != "ok":
-                technical_skip_count += 1
-                output = _build_technical_skip_output(
-                    judge_input=judge_input,
-                    student_status=student_status,
-                    max_score=max_score,
-                )
-                f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
-                continue
-
-            answer_type = normalize_answer_type(student.get("answer_type"))
-
-            if answer_type in DETERMINISTIC_TYPES:
-                deterministic_count += 1
-                judge_result = deterministic_score(
-                    answer_type=answer_type,
-                    student_answer=student.get("student_answer"),
-                    canonical_answer=gold_q.get("canonical_answer"),
-                )
-                output = _build_deterministic_output(
-                    judge_input=judge_input,
-                    judge_result=judge_result,
-                    max_score=max_score,
-                )
-                f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
-                continue
-
-            llm_count += 1
-            try:
-                judge_result = run_structured_judge(
-                    model_name=model_name,
-                    model_url=judge_model_url,
-                    api_key=judge_api_key,
-                    user_prompt=build_user_prompt(judge_input),
-                    retries=judge_structured_retries,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    reasoning_effort=reasoning_effort,
-                )
-                output = _build_llm_success_output(
-                    judge_input=judge_input,
-                    judge_result=judge_result,
-                    max_score=max_score,
-                    model_name=model_name,
-                )
-            except Exception as exc:
-                _raise_model_limit_exceeded(
-                    exc=exc,
-                    model_name=model_name,
-                    key=key,
-                    prefix="Judge model limit exceeded; aborting run. ",
-                )
-                judge_error_count += 1
-                output = _build_llm_error_output(
-                    judge_input=judge_input,
-                    max_score=max_score,
-                    model_name=model_name,
-                    llm_comment=f"Judging failed: {str(exc)[:240]}",
-                )
+                    if answer_type in DETERMINISTIC_TYPES:
+                        deterministic_count += 1
+                        judge_mode = "deterministic"
+                        judge_result = deterministic_score(
+                            answer_type=answer_type,
+                            student_answer=student.get("student_answer"),
+                            canonical_answer=gold_q.get("canonical_answer"),
+                        )
+                        output = _build_deterministic_output(
+                            judge_input=judge_input,
+                            judge_result=judge_result,
+                            max_score=max_score,
+                        )
+                    else:
+                        llm_count += 1
+                        judge_mode = "llm_judge"
+                        try:
+                            judge_result = run_structured_judge(
+                                model_name=model_name,
+                                model_url=judge_model_url,
+                                api_key=judge_api_key,
+                                user_prompt=build_user_prompt(judge_input),
+                                retries=judge_structured_retries,
+                                temperature=temperature,
+                                max_tokens=max_tokens,
+                                reasoning_effort=reasoning_effort,
+                            )
+                            output = _build_llm_success_output(
+                                judge_input=judge_input,
+                                judge_result=judge_result,
+                                max_score=max_score,
+                                model_name=model_name,
+                            )
+                        except Exception as exc:
+                            _raise_model_limit_exceeded(
+                                exc=exc,
+                                model_name=model_name,
+                                key=key,
+                                prefix="Judge model limit exceeded; aborting run. ",
+                            )
+                            judge_error_count += 1
+                            judge_mode = "judge_error"
+                            output = _build_llm_error_output(
+                                judge_input=judge_input,
+                                max_score=max_score,
+                                model_name=model_name,
+                                llm_comment=f"Judging failed: {str(exc)[:240]}",
+                            )
 
             f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
+            f_out.flush()
+            if trace_log_enabled:
+                trace_log_path = _build_trace_log_path(resolved_trace_log_dir, student, line_idx)
+                _append_judge_trace(
+                    trace_log_path=trace_log_path,
+                    line_idx=line_idx,
+                    judge_mode=judge_mode,
+                    judge_input=judge_input,
+                    judge_output=output,
+                )
 
     tqdm.write(
         "Judging summary: "
@@ -523,6 +612,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional API key override for judge stage",
     )
+    parser.add_argument(
+        "--trace-log-enabled",
+        type=_str_to_bool,
+        default=False,
+        help="Append judge result to per-question traces (default: false)",
+    )
+    parser.add_argument(
+        "--trace-log-dir",
+        type=Path,
+        default=None,
+        help="Directory with per-question trace logs (default: <output-dir>/traces)",
+    )
     return parser.parse_args()
 
 
@@ -539,4 +640,6 @@ if __name__ == "__main__":
         judge_structured_retries=args.judge_structured_retries,
         judge_model_url=args.judge_model_url,
         judge_api_key=args.judge_api_key,
+        trace_log_enabled=args.trace_log_enabled,
+        trace_log_dir=args.trace_log_dir,
     )

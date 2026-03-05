@@ -119,6 +119,45 @@ class JudgeStructuredTests(unittest.TestCase):
                         judge_api_key="test-key",
                     )
 
+    def test_judge_appends_result_to_existing_trace(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            input_path = tmp / "student.jsonl"
+            gold_path = tmp / "gold.jsonl"
+            output_path = tmp / "judge.jsonl"
+            trace_dir = tmp / "traces"
+            trace_dir.mkdir(parents=True, exist_ok=True)
+            trace_path = trace_dir / "0001_exam_1_p1_q1.log"
+            trace_path.write_text("=== TRACE METADATA ===\n{}\n", encoding="utf-8")
+            _write_single_judge_case(input_path, gold_path)
+
+            with mock.patch(
+                "scripts.evaluation.llm_judge.run_structured_judge",
+                return_value={
+                    "llm_score": 0.6,
+                    "llm_comment": "structured ok",
+                    "judge_request_id": "req_123",
+                    "judge_latency_ms": 42,
+                },
+            ):
+                run_llm_judge(
+                    input_path=input_path,
+                    gold_path=gold_path,
+                    output_path=output_path,
+                    model_name="judge-model",
+                    max_tokens=128,
+                    temperature=0.0,
+                    judge_structured_retries=1,
+                    judge_api_key="test-key",
+                    trace_log_enabled=True,
+                    trace_log_dir=trace_dir,
+                )
+
+            trace_content = trace_path.read_text(encoding="utf-8")
+            self.assertIn("=== JUDGE RESULT ===", trace_content)
+            self.assertIn("\"judge_mode\": \"llm_judge\"", trace_content)
+            self.assertIn("structured ok", trace_content)
+
 
 if __name__ == "__main__":
     unittest.main()
