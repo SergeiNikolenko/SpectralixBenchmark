@@ -6,9 +6,11 @@ from unittest import mock
 
 from pydantic import ValidationError
 
-from scripts.evaluation.llm_judge import deterministic_score, run_llm_judge
+from scripts.evaluation.llm_judge import build_user_prompt, deterministic_score, run_llm_judge
 from scripts.pydantic_guard.retry import run_with_retries
+from scripts.pydantic_guard.parser_repair import PARSER_REPAIR_SYSTEM_PROMPT
 from scripts.pydantic_guard.schemas import JudgeResult, ParsedQuestionSchema, StudentGuardOutput
+from scripts.pydantic_guard.student_guard import _build_prompt as build_student_guard_prompt
 from scripts.pydantic_guard.student_guard import is_answer_invalid
 
 
@@ -83,6 +85,16 @@ class StudentGuardHeuristicTests(unittest.TestCase):
         self.assertFalse(is_answer_invalid("single_choice", "A"))
         self.assertFalse(is_answer_invalid("ordering", "2; 1"))
 
+    def test_student_guard_prompt_is_repair_only(self):
+        prompt = build_student_guard_prompt(
+            {"question_text": "Choose the best answer.", "answer_type": "single_choice"},
+            raw_answer="The correct answer is A.",
+            normalized_answer="The correct answer is A.",
+        )
+        self.assertIn("Repair the answer format", prompt)
+        self.assertIn("If the answer cannot be repaired without guessing", prompt)
+        self.assertIn("<answer_format>", prompt)
+
 
 class JudgeDeterministicTests(unittest.TestCase):
     def test_msms_string_match_is_case_insensitive(self):
@@ -95,6 +107,20 @@ class JudgeDeterministicTests(unittest.TestCase):
 
 
 class JudgeStructuredTests(unittest.TestCase):
+    def test_judge_prompt_includes_scoring_rules(self):
+        prompt = build_user_prompt(
+            {
+                "question_type": "text",
+                "answer_type": "text",
+                "question_text": "Explain result",
+                "canonical_answer": "expected",
+                "student_answer": "demo",
+            }
+        )
+        self.assertIn("<scoring_rules>", prompt)
+        self.assertIn("Score in the range [0.0, 1.0].", prompt)
+        self.assertIn("Prefer semantic correctness over style.", prompt)
+
     def test_structured_quota_error_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
@@ -157,6 +183,11 @@ class JudgeStructuredTests(unittest.TestCase):
             self.assertIn("=== JUDGE RESULT ===", trace_content)
             self.assertIn("\"judge_mode\": \"llm_judge\"", trace_content)
             self.assertIn("structured ok", trace_content)
+
+
+class ParserRepairPromptTests(unittest.TestCase):
+    def test_parser_repair_system_prompt_mentions_no_invention(self):
+        self.assertIn("do not invent missing content", PARSER_REPAIR_SYSTEM_PROMPT.lower())
 
 
 if __name__ == "__main__":

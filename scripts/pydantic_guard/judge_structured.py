@@ -13,7 +13,8 @@ from .schemas import JudgeResult
 JUDGE_STRUCTURED_SYSTEM_PROMPT = (
     "You are an expert chemistry exam examiner. "
     "Return only strict structured output according to the required schema. "
-    "Score must be in [0, 1], and comment must be concise and factual."
+    "Score must be in [0, 1]. "
+    "The comment must be concise, factual, and justified by the question, canonical answer, and student answer only."
 )
 
 

@@ -12,7 +12,7 @@ from .schemas import ParsedQuestionSchema, parsed_questions_to_dicts
 PARSER_REPAIR_SYSTEM_PROMPT = (
     "You repair parser outputs for chemistry exam pages. "
     "Return a strict list of question objects matching schema. "
-    "If page has no questions, return an empty list."
+    "Preserve source meaning, do not invent missing content, and return an empty list if the page has no questions."
 )
 
 
@@ -42,12 +42,24 @@ def repair_parsed_questions(
     )
 
     prompt = (
+        "<task>\n"
+        "Repair the parser output so it matches schema without inventing information.\n"
+        "</task>\n\n"
+        "<page_context>\n"
         f"Exam ID: {exam_id}\n"
-        f"Page ID: {page_id}\n\n"
-        "Original parsing instructions:\n"
-        f"{marker_prompt}\n\n"
-        "Raw model response to repair:\n"
+        f"Page ID: {page_id}\n"
+        "</page_context>\n\n"
+        "<rules>\n"
+        "- Preserve source wording when possible.\n"
+        "- Repair structure and field normalization only.\n"
+        "- If a field is missing and cannot be recovered from the raw response, leave it empty or use error status rather than guessing.\n"
+        "</rules>\n\n"
+        "<original_parsing_instructions>\n"
+        f"{marker_prompt}\n"
+        "</original_parsing_instructions>\n\n"
+        "<raw_model_response>\n"
         f"{raw_response}\n"
+        "</raw_model_response>\n"
     )
 
     def _invoke() -> List[Dict[str, Any]]:

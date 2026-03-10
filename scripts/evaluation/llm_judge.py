@@ -211,17 +211,40 @@ def deterministic_score(answer_type: str, student_answer: Any, canonical_answer:
 
 def build_user_prompt(item: Dict[str, Any]) -> str:
     return f"""
+<task>
+Grade the student answer against the canonical answer for a chemistry exam question.
+</task>
+
+<scoring_rules>
+- Score in the range [0.0, 1.0].
+- Use 1.0 only when the student answer is fully correct for the requested answer_type.
+- Use 0.0 when the answer is incorrect, incompatible with the question, or effectively missing.
+- Use intermediate scores only for meaningful partial correctness.
+- Penalize chemistry mistakes more than wording differences.
+- Prefer semantic correctness over style.
+</scoring_rules>
+
+<output_contract>
+Return strict structured output only.
+Keep the comment concise, factual, and evidence-based.
+</output_contract>
+
+<question_context>
 Question type: {item.get("question_type")}
 Answer type: {item.get("answer_type")}
+</question_context>
 
-Question:
+<question>
 {item.get("question_text")}
+</question>
 
-Canonical answer:
+<canonical_answer>
 {item.get("canonical_answer")}
+</canonical_answer>
 
-Student answer:
+<student_answer>
 {item.get("student_answer")}
+</student_answer>
 """.strip()
 
 

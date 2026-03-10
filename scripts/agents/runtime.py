@@ -70,7 +70,7 @@ class AgentRuntime:
         )
 
         runtime_cfg = self.config.get("runtime") or {}
-        self.add_base_tools = bool(runtime_cfg.get("add_base_tools", False))
+        self.requested_base_tools = bool(runtime_cfg.get("add_base_tools", False))
         self.use_structured_outputs_internally = bool(
             runtime_cfg.get("use_structured_outputs_internally", True)
         )
@@ -78,6 +78,10 @@ class AgentRuntime:
         self.additional_authorized_imports = list(
             runtime_cfg.get("additional_authorized_imports") or []
         )
+        security_cfg = self.config.get("security") or {}
+        self.allow_network_tools = bool(security_cfg.get("allow_network_tools", False))
+        self.add_base_tools = self.requested_base_tools and self.allow_network_tools
+
         if self.add_base_tools:
             try:
                 import ddgs  # noqa: F401
@@ -89,7 +93,6 @@ class AgentRuntime:
                     "or set add_base_tools=false."
                 ) from exc
 
-        security_cfg = self.config.get("security") or {}
         self.allowed_hosts = [h.strip() for h in security_cfg.get("allowed_tool_hosts") or [] if h.strip()]
         self._agent: Optional[Any] = None
         self._agent_stack: Optional[ExitStack] = None

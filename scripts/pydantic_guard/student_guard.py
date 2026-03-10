@@ -46,12 +46,28 @@ def _build_prompt(question: Dict[str, Any], raw_answer: str, normalized_answer: 
         "Return a concise machine-readable final answer with no markdown fences.",
     )
     return (
-        f"Question:\n{question.get('question_text', '')}\n\n"
+        "<task>\n"
+        "Repair the answer format without changing meaning unless a minimal rewrite is required.\n"
+        "</task>\n\n"
+        "<rules>\n"
+        "- Preserve the intended chemistry answer whenever possible.\n"
+        "- Repair formatting only.\n"
+        "- Do not add explanations, markdown fences, or benchmark commentary.\n"
+        "- If the answer cannot be repaired without guessing, return format_ok=false.\n"
+        "</rules>\n\n"
+        "<question>\n"
+        f"{question.get('question_text', '')}\n"
+        "</question>\n\n"
+        "<answer_format>\n"
         f"Answer type: {answer_type}\n"
-        f"Required format: {format_rule}\n\n"
-        f"Raw answer:\n{raw_answer or ''}\n\n"
-        f"Current normalized answer:\n{normalized_answer or ''}\n\n"
-        "Rewrite the answer strictly to required format."
+        f"Required format: {format_rule}\n"
+        "</answer_format>\n\n"
+        "<raw_answer>\n"
+        f"{raw_answer or ''}\n"
+        "</raw_answer>\n\n"
+        "<current_normalized_answer>\n"
+        f"{normalized_answer or ''}\n"
+        "</current_normalized_answer>"
     )
 
 
@@ -75,9 +91,9 @@ def run_student_guard(
         model,
         output_type=StudentGuardOutput,
         system_prompt=(
-            "You repair chemistry benchmark answers. "
-            "Return only strict structured output matching schema. "
-            "Do not add explanations beyond final answer field."
+            "You repair chemistry answers into strict machine-readable format. "
+            "Return only structured output matching schema. "
+            "Do not solve a different problem, and do not add explanations beyond the schema fields."
         ),
         output_retries=max(0, int(retries)),
     )

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from scripts.agents.config import build_executor_kwargs, load_agent_config
 from scripts.agents.models import ensure_chat_completions_url, parse_model_url
-from scripts.agents.prompts import build_student_task
+from scripts.agents.prompts import build_parse_page_task, build_student_task
 from scripts.agents.runtime import AgentRuntime
 from scripts.agents.tool_registry import build_tools, safe_http_get_tool
 
@@ -155,9 +155,34 @@ class RuntimeInitTests(unittest.TestCase):
         self.assertEqual(runtime.executor_type, "local")
         self.assertEqual(runtime.executor_kwargs, {})
 
-    def test_add_base_tools_true_initializes_runtime(self):
+    def test_base_tools_disabled_when_network_tools_off(self):
+        runtime = AgentRuntime(
+            model_url="http://127.0.0.1:8317/v1",
+            model_name="gpt-4o-mini",
+            api_key="test-key",
+            sandbox="local",
+            tools_profile="minimal",
+        )
+        self.assertFalse(runtime.allow_network_tools)
+        self.assertFalse(runtime.add_base_tools)
+        runtime.close()
+
+    def test_base_tools_enabled_only_when_network_tools_allowed(self):
         config_path = Path("scripts/agents/_test_base_tools_true.yaml")
-        config_path.write_text("runtime:\n  add_base_tools: true\n", encoding="utf-8")
+        config_path.write_text(
+            "\n".join(
+                [
+                    "runtime:",
+                    "  add_base_tools: true",
+                    "security:",
+                    "  allow_network_tools: true",
+                    "  allowed_tool_hosts:",
+                    "    - api.openai.com",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         try:
             runtime = AgentRuntime(
                 model_url="http://127.0.0.1:8317/v1",
@@ -167,6 +192,7 @@ class RuntimeInitTests(unittest.TestCase):
                 tools_profile="minimal",
                 config_path=config_path,
             )
+            self.assertTrue(runtime.allow_network_tools)
             self.assertTrue(runtime.add_base_tools)
             runtime.close()
         finally:
@@ -188,6 +214,32 @@ class PromptSecurityTests(unittest.TestCase):
         self.assertNotIn("question_id", prompt)
         self.assertNotIn("Question metadata", prompt)
         self.assertNotIn("benchmark", prompt.lower())
+
+    def test_student_prompt_includes_contract_sections(self):
+        prompt = build_student_task(
+            {
+                "answer_type": "structure",
+                "question_text": "Propose the product structure.",
+            }
+        )
+        self.assertIn("<role>", prompt)
+        self.assertIn("<answer_format>", prompt)
+        self.assertIn("<tool_rules>", prompt)
+        self.assertIn("<completion_criteria>", prompt)
+        self.assertIn("Return exactly one SMILES string", prompt)
+        self.assertIn("Do not use tools to look for hidden metadata", prompt)
+
+    def test_parser_prompt_includes_extraction_contract(self):
+        prompt = build_parse_page_task(
+            exam_id="exam_7",
+            page_id=4,
+            marker_prompt="Extract all questions.",
+            image_path="/tmp/page.png",
+        )
+        self.assertIn("<task>", prompt)
+        self.assertIn("<extraction_rules>", prompt)
+        self.assertIn("Do not invent missing fields.", prompt)
+        self.assertIn("return []", prompt)
 
 
 if __name__ == "__main__":
