@@ -143,7 +143,12 @@ uv run python -m scripts.evaluation.student_validation \
 Judge structured flags:
 
 - `--judge-structured-retries` (default: `2`)
+- `--judge-method` (`structured|g_eval`, default: `structured`)
+- `--judge-g-eval-fallback-structured` (`true|false`, default: `true`)
 - `--reasoning-effort` (`low|medium|high`, default: `high`)
+
+`g_eval` mode applies only to open-ended answer types and keeps deterministic scoring for exact-match types.
+It uses rubric-guided structured judging and can fall back to the standard structured judge on failure.
 
 ```bash
 uv run python -m scripts.evaluation.llm_judge \
@@ -153,6 +158,8 @@ uv run python -m scripts.evaluation.llm_judge \
   --reasoning-effort high \
   --judge-model-url "http://127.0.0.1:8317/v1" \
   --judge-api-key "ccs-internal-managed" \
+  --judge-method g_eval \
+  --judge-g-eval-fallback-structured true \
   --judge-structured-retries 2 \
   --output-path scripts/evaluation/llm_judge_output.jsonl
 ```
@@ -172,6 +179,8 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
+  --judge-method g_eval \
+  --judge-g-eval-fallback-structured true \
   --judge-reasoning-effort high \
   --trace-log-enabled true \
   --trace-log-dir runs/debug_traces \

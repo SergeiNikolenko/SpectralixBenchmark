@@ -440,6 +440,19 @@ def parse_args() -> argparse.Namespace:
         help="Structured judge retries (default: 2)",
     )
     parser.add_argument(
+        "--judge-method",
+        type=str,
+        default="structured",
+        choices=["structured", "g_eval"],
+        help="Judge method for open-ended answer types: structured|g_eval (default: structured)",
+    )
+    parser.add_argument(
+        "--judge-g-eval-fallback-structured",
+        type=str,
+        default="true",
+        help="Fallback from g_eval to structured judge on error (true/false, default: true)",
+    )
+    parser.add_argument(
         "--judge-model-url",
         type=str,
         default=None,
@@ -468,6 +481,7 @@ def main() -> None:
     student_guard_enabled = _is_truthy(args.student_guard_enabled)
     trace_log_enabled = _is_truthy(args.trace_log_enabled)
     verbose_output_enabled = _is_truthy(args.verbose_output_enabled)
+    judge_g_eval_fallback_structured = _is_truthy(args.judge_g_eval_fallback_structured)
 
     for model_name in args.student_models:
         model_slug = sanitize_model_name(model_name)
@@ -544,6 +558,8 @@ def main() -> None:
                 temperature=args.judge_temperature,
                 reasoning_effort=args.judge_reasoning_effort,
                 judge_structured_retries=args.judge_structured_retries,
+                judge_method=args.judge_method,
+                judge_g_eval_fallback_structured=judge_g_eval_fallback_structured,
                 judge_model_url=args.judge_model_url,
                 judge_api_key=args.judge_api_key or args.api_key,
                 trace_log_enabled=trace_log_enabled,

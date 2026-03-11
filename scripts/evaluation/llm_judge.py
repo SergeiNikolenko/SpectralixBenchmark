@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
+from scripts.evaluation.judge_rubrics import get_g_eval_spec
+from scripts.pydantic_guard.judge_geval import run_g_eval_judge
 from scripts.pydantic_guard.judge_structured import run_structured_judge
 
 DETERMINISTIC_TYPES = {
@@ -248,6 +250,52 @@ Answer type: {item.get("answer_type")}
 """.strip()
 
 
+def build_g_eval_prompt(item: Dict[str, Any]) -> str:
+    spec = get_g_eval_spec(item.get("answer_type"))
+    criteria = "\n".join(f"- {entry}" for entry in spec["criteria"])
+    evaluation_steps = "\n".join(f"{idx}. {entry}" for idx, entry in enumerate(spec["evaluation_steps"], start=1))
+    rubric = "\n".join(f"- {entry}" for entry in spec["rubric"])
+    return f"""
+<task>
+Evaluate the student answer using rubric-guided chemistry grading.
+</task>
+
+<criteria>
+{criteria}
+</criteria>
+
+<evaluation_steps>
+{evaluation_steps}
+</evaluation_steps>
+
+<rubric>
+{rubric}
+</rubric>
+
+<output_contract>
+Return strict structured output only.
+Provide concrete step findings and one final rubric score from 0 to 10.
+</output_contract>
+
+<question_context>
+Question type: {item.get("question_type")}
+Answer type: {item.get("answer_type")}
+</question_context>
+
+<question>
+{item.get("question_text")}
+</question>
+
+<canonical_answer>
+{item.get("canonical_answer")}
+</canonical_answer>
+
+<student_answer>
+{item.get("student_answer")}
+</student_answer>
+""".strip()
+
+
 def _is_model_limit_error(error_message: str) -> bool:
     text = str(error_message or "").strip().lower()
     if not text:
@@ -275,6 +323,7 @@ def _build_llm_success_output(
     judge_result: Dict[str, Any],
     max_score: float,
     model_name: str,
+    score_method: str = "llm_judge",
 ) -> Dict[str, Any]:
     return {
         **judge_input,
@@ -282,7 +331,7 @@ def _build_llm_success_output(
         "llm_comment": judge_result["llm_comment"],
         "final_score": max_score * float(judge_result["llm_score"]),
         "max_score": max_score,
-        "score_method": "llm_judge",
+        "score_method": score_method,
         "judge_model": model_name,
         "judge_request_id": judge_result.get("judge_request_id"),
         "judge_latency_ms": judge_result.get("judge_latency_ms"),
@@ -394,6 +443,7 @@ def _append_judge_trace(
     judge_mode: str,
     judge_input: Dict[str, Any],
     judge_output: Dict[str, Any],
+    judge_trace_details: Optional[Dict[str, Any]] = None,
 ) -> None:
     trace_payload = {
         "line_idx": line_idx,
@@ -421,6 +471,11 @@ def _append_judge_trace(
             "=== JUDGE INPUT SNAPSHOT ===\n"
             f"{json.dumps(input_snapshot, ensure_ascii=False, indent=2)}\n"
         )
+        if judge_trace_details:
+            f.write(
+                "\n=== JUDGE DETAILS ===\n"
+                f"{json.dumps(judge_trace_details, ensure_ascii=False, indent=2)}\n"
+            )
 
 
 def _str_to_bool(value: str) -> bool:
@@ -441,6 +496,8 @@ def run_llm_judge(
     temperature: float,
     reasoning_effort: str = "high",
     judge_structured_retries: int = 2,
+    judge_method: str = "structured",
+    judge_g_eval_fallback_structured: bool = True,
     judge_model_url: Optional[str] = None,
     judge_api_key: Optional[str] = None,
     trace_log_enabled: bool = False,
@@ -473,6 +530,7 @@ def run_llm_judge(
             student = json.loads(line)
             key = build_key(student)
             judge_mode = "unknown"
+            judge_trace_details: Optional[Dict[str, Any]] = None
 
             gold_q = gold.get(key)
             if gold_q is None:
@@ -519,21 +577,58 @@ def run_llm_judge(
                         llm_count += 1
                         judge_mode = "llm_judge"
                         try:
-                            judge_result = run_structured_judge(
-                                model_name=model_name,
-                                model_url=judge_model_url,
-                                api_key=judge_api_key,
-                                user_prompt=build_user_prompt(judge_input),
-                                retries=judge_structured_retries,
-                                temperature=temperature,
-                                max_tokens=max_tokens,
-                                reasoning_effort=reasoning_effort,
-                            )
+                            if judge_method == "g_eval":
+                                judge_mode = "g_eval"
+                                try:
+                                    judge_result = run_g_eval_judge(
+                                        model_name=model_name,
+                                        model_url=judge_model_url,
+                                        api_key=judge_api_key,
+                                        user_prompt=build_g_eval_prompt(judge_input),
+                                        retries=judge_structured_retries,
+                                        temperature=temperature,
+                                        max_tokens=max_tokens,
+                                        reasoning_effort=reasoning_effort,
+                                    )
+                                    judge_trace_details = judge_result.get("g_eval_trace")
+                                    score_method = "g_eval"
+                                except Exception:
+                                    if not judge_g_eval_fallback_structured:
+                                        raise
+                                    judge_mode = "g_eval_fallback_structured"
+                                    judge_result = run_structured_judge(
+                                        model_name=model_name,
+                                        model_url=judge_model_url,
+                                        api_key=judge_api_key,
+                                        user_prompt=build_user_prompt(judge_input),
+                                        retries=judge_structured_retries,
+                                        temperature=temperature,
+                                        max_tokens=max_tokens,
+                                        reasoning_effort=reasoning_effort,
+                                    )
+                                    judge_trace_details = {
+                                        "fallback_from": "g_eval",
+                                        "fallback_to": "structured",
+                                    }
+                                    score_method = "structured_fallback"
+                            else:
+                                judge_result = run_structured_judge(
+                                    model_name=model_name,
+                                    model_url=judge_model_url,
+                                    api_key=judge_api_key,
+                                    user_prompt=build_user_prompt(judge_input),
+                                    retries=judge_structured_retries,
+                                    temperature=temperature,
+                                    max_tokens=max_tokens,
+                                    reasoning_effort=reasoning_effort,
+                                )
+                                score_method = "llm_judge"
                             output = _build_llm_success_output(
                                 judge_input=judge_input,
                                 judge_result=judge_result,
                                 max_score=max_score,
                                 model_name=model_name,
+                                score_method=score_method,
                             )
                         except Exception as exc:
                             _raise_model_limit_exceeded(
@@ -561,6 +656,7 @@ def run_llm_judge(
                     judge_mode=judge_mode,
                     judge_input=judge_input,
                     judge_output=output,
+                    judge_trace_details=judge_trace_details,
                 )
 
     tqdm.write(
@@ -624,6 +720,19 @@ def parse_args() -> argparse.Namespace:
         help="PydanticAI structured judge retries (default: 2)",
     )
     parser.add_argument(
+        "--judge-method",
+        type=str,
+        default="structured",
+        choices=["structured", "g_eval"],
+        help="Judge method for open-ended answer types: structured|g_eval (default: structured)",
+    )
+    parser.add_argument(
+        "--judge-g-eval-fallback-structured",
+        type=_str_to_bool,
+        default=True,
+        help="Fallback from g_eval to structured judge on error (default: true)",
+    )
+    parser.add_argument(
         "--judge-model-url",
         type=str,
         default=None,
@@ -661,6 +770,8 @@ if __name__ == "__main__":
         temperature=args.temperature,
         reasoning_effort=args.reasoning_effort,
         judge_structured_retries=args.judge_structured_retries,
+        judge_method=args.judge_method,
+        judge_g_eval_fallback_structured=args.judge_g_eval_fallback_structured,
         judge_model_url=args.judge_model_url,
         judge_api_key=args.judge_api_key,
         trace_log_enabled=args.trace_log_enabled,

@@ -27,6 +27,13 @@ class JudgeResult(BaseModel):
     llm_comment: str = Field(default="")
 
 
+class GEvalJudgeResult(BaseModel):
+    criteria_steps: list[str] = Field(default_factory=list)
+    step_findings: list[str] = Field(default_factory=list)
+    rubric_score_0_to_10: int = Field(ge=0, le=10)
+    llm_comment: str = Field(min_length=1)
+
+
 class StudentGuardOutput(BaseModel):
     final_answer: str = Field(min_length=1)
     format_ok: bool = True

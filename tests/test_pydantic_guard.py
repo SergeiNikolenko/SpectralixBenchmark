@@ -6,10 +6,11 @@ from unittest import mock
 
 from pydantic import ValidationError
 
-from scripts.evaluation.llm_judge import build_user_prompt, deterministic_score, run_llm_judge
+from scripts.evaluation.llm_judge import build_g_eval_prompt, build_user_prompt, deterministic_score, run_llm_judge
+from scripts.evaluation.judge_rubrics import get_g_eval_spec
 from scripts.pydantic_guard.retry import run_with_retries
 from scripts.pydantic_guard.parser_repair import PARSER_REPAIR_SYSTEM_PROMPT
-from scripts.pydantic_guard.schemas import JudgeResult, ParsedQuestionSchema, StudentGuardOutput
+from scripts.pydantic_guard.schemas import GEvalJudgeResult, JudgeResult, ParsedQuestionSchema, StudentGuardOutput
 from scripts.pydantic_guard.student_guard import _build_prompt as build_student_guard_prompt
 from scripts.pydantic_guard.student_guard import is_answer_invalid
 
@@ -53,6 +54,15 @@ class SchemaTests(unittest.TestCase):
     def test_student_guard_output_requires_non_empty_answer(self):
         with self.assertRaises(ValidationError):
             StudentGuardOutput(final_answer="", format_ok=True)
+
+    def test_g_eval_result_score_range_validation(self):
+        with self.assertRaises(ValidationError):
+            GEvalJudgeResult(
+                criteria_steps=["a"],
+                step_findings=["b"],
+                rubric_score_0_to_10=11,
+                llm_comment="bad",
+            )
 
     def test_parsed_question_requires_fields_for_ok_status(self):
         with self.assertRaises(ValidationError):
@@ -121,6 +131,25 @@ class JudgeStructuredTests(unittest.TestCase):
         self.assertIn("Score in the range [0.0, 1.0].", prompt)
         self.assertIn("Prefer semantic correctness over style.", prompt)
 
+    def test_g_eval_prompt_includes_rubric_sections(self):
+        prompt = build_g_eval_prompt(
+            {
+                "question_type": "text",
+                "answer_type": "full_synthesis",
+                "question_text": "Design a synthesis.",
+                "canonical_answer": "Route A",
+                "student_answer": "Route B",
+            }
+        )
+        self.assertIn("<criteria>", prompt)
+        self.assertIn("<evaluation_steps>", prompt)
+        self.assertIn("<rubric>", prompt)
+        self.assertIn("Assign a rubric score from 0 to 10.", prompt)
+
+    def test_g_eval_uses_answer_type_specific_rubric(self):
+        spec = get_g_eval_spec("full_synthesis")
+        self.assertTrue(any("synthetic route" in line.lower() for line in spec["criteria"]))
+
     def test_structured_quota_error_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)
@@ -183,6 +212,81 @@ class JudgeStructuredTests(unittest.TestCase):
             self.assertIn("=== JUDGE RESULT ===", trace_content)
             self.assertIn("\"judge_mode\": \"llm_judge\"", trace_content)
             self.assertIn("structured ok", trace_content)
+
+    def test_g_eval_output_path(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            input_path = tmp / "student.jsonl"
+            gold_path = tmp / "gold.jsonl"
+            output_path = tmp / "judge.jsonl"
+            _write_single_judge_case(input_path, gold_path)
+
+            with mock.patch(
+                "scripts.evaluation.llm_judge.run_g_eval_judge",
+                return_value={
+                    "llm_score": 0.8,
+                    "llm_comment": "good match",
+                    "judge_request_id": None,
+                    "judge_latency_ms": 50,
+                    "g_eval_trace": {
+                        "criteria_steps": ["step1"],
+                        "step_findings": ["finding1"],
+                        "rubric_score_0_to_10": 8,
+                    },
+                },
+            ):
+                run_llm_judge(
+                    input_path=input_path,
+                    gold_path=gold_path,
+                    output_path=output_path,
+                    model_name="judge-model",
+                    max_tokens=128,
+                    temperature=0.0,
+                    judge_structured_retries=1,
+                    judge_api_key="test-key",
+                    judge_method="g_eval",
+                )
+
+            rows = _read_jsonl(output_path)
+            self.assertEqual(rows[0]["score_method"], "g_eval")
+            self.assertEqual(rows[0]["llm_score"], 0.8)
+
+    def test_g_eval_falls_back_to_structured(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            input_path = tmp / "student.jsonl"
+            gold_path = tmp / "gold.jsonl"
+            output_path = tmp / "judge.jsonl"
+            _write_single_judge_case(input_path, gold_path)
+
+            with mock.patch(
+                "scripts.evaluation.llm_judge.run_g_eval_judge",
+                side_effect=RuntimeError("g_eval failed"),
+            ), mock.patch(
+                "scripts.evaluation.llm_judge.run_structured_judge",
+                return_value={
+                    "llm_score": 0.6,
+                    "llm_comment": "structured fallback",
+                    "judge_request_id": None,
+                    "judge_latency_ms": 30,
+                },
+            ):
+                run_llm_judge(
+                    input_path=input_path,
+                    gold_path=gold_path,
+                    output_path=output_path,
+                    model_name="judge-model",
+                    max_tokens=128,
+                    temperature=0.0,
+                    judge_structured_retries=1,
+                    judge_api_key="test-key",
+                    judge_method="g_eval",
+                    judge_g_eval_fallback_structured=True,
+                )
+
+            rows = _read_jsonl(output_path)
+            self.assertEqual(rows[0]["score_method"], "structured_fallback")
+            self.assertEqual(rows[0]["llm_comment"], "structured fallback")
 
 
 class ParserRepairPromptTests(unittest.TestCase):
