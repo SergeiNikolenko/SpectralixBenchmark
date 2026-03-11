@@ -442,9 +442,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--judge-method",
         type=str,
-        default="structured",
+        default="g_eval",
         choices=["structured", "g_eval"],
-        help="Judge method for open-ended answer types: structured|g_eval (default: structured)",
+        help="Judge method for open-ended answer types: structured|g_eval (default: g_eval)",
     )
     parser.add_argument(
         "--judge-g-eval-fallback-structured",
