@@ -62,6 +62,8 @@
   - Strict schemas: `JudgeResult`, `StudentGuardOutput`, `ParsedQuestionSchema`
 - `judge_structured.py`
   - Structured judge execution + retry
+- `judge_geval.py`
+  - rubric-guided G-Eval judge execution + retry
 - `student_guard.py`
   - Answer-format validation + guard repair execution
 - `parser_repair.py`
@@ -106,3 +108,8 @@ These values are persisted to `student_status` in output JSONL.
 - Added aliases for operational compatibility:
   - `--api-base-url`
   - `--models` (alias for `--student-models` in matrix runner)
+
+## Related Docs
+
+- `docs/g_eval.md`
+- `docs/security_runbook.md`

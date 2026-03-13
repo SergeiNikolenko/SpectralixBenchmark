@@ -61,7 +61,7 @@ Included sources:
 - `ORDerly` retrosynthesis test split
 - `PaRoutes selected_reactions_all`
 
-Primary task subtype:
+Primary task subtypes:
 
 - `immediate_precursor_prediction`
 - `immediate_precursor_with_disconnection`

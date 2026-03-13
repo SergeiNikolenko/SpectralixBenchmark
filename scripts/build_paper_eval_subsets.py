@@ -62,7 +62,8 @@ def build_selection(pool_path: Path, rules: list[Rule]) -> set[str]:
 
 
 def fill_to_target(pool_path: Path, selected_ids: set[str], target_count: int) -> set[str]:
-    if len(selected_ids) >= target_count:
+    slots_needed = target_count - len(selected_ids)
+    if slots_needed <= 0:
         return selected_ids
 
     heap: list[tuple[int, str]] = []
@@ -74,8 +75,7 @@ def fill_to_target(pool_path: Path, selected_ids: set[str], target_count: int) -
                 continue
             rank = stable_rank(record_id)
             item = (-rank, record_id)
-            needed = target_count - len(selected_ids)
-            if len(heap) < needed:
+            if len(heap) < slots_needed:
                 heapq.heappush(heap, item)
                 continue
             if item > heap[0]:
@@ -96,12 +96,13 @@ def write_subset(pool_path: Path, output_path: Path, selected_ids: set[str]) -> 
     ) as sink:
         for line in source:
             row = json.loads(line)
-            if row["record_id"] not in selected_ids:
+            record_id = row["record_id"]
+            if record_id not in selected_ids:
                 continue
-            if row["record_id"] in written_ids:
+            if record_id in written_ids:
                 continue
             sink.write(json.dumps(row, ensure_ascii=False) + "\n")
-            written_ids.add(row["record_id"])
+            written_ids.add(record_id)
             count += 1
     return count
 

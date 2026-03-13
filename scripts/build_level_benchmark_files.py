@@ -705,6 +705,11 @@ def infer_paroutes_c_difficulty(route: dict[str, Any]) -> str:
 def iter_paroutes_route_records(path: Path, route_set: str) -> Iterator[dict[str, Any]]:
     routes = json.loads(path.read_text(encoding="utf-8"))
     for index, route in enumerate(routes, start=1):
+        route_depth = route_reaction_depth(route)
+        reaction_steps = count_reaction_nodes(route)
+        branching_reaction_nodes = count_branching_reaction_nodes(route)
+        terminal_molecules = count_terminal_molecules(route)
+        terminal_in_stock = count_terminal_molecules(route, require_in_stock=True)
         yield build_record(
             record_id=f"paroutes_{route_set}_{index:05d}",
             level="C",
@@ -720,11 +725,11 @@ def iter_paroutes_route_records(path: Path, route_set: str) -> Iterator[dict[str
             },
             gold_payload={
                 "reference_route": route,
-                "route_depth": route_reaction_depth(route),
-                "reaction_steps": count_reaction_nodes(route),
-                "branching_reaction_nodes": count_branching_reaction_nodes(route),
-                "terminal_molecules": count_terminal_molecules(route),
-                "terminal_in_stock": count_terminal_molecules(route, require_in_stock=True),
+                "route_depth": route_depth,
+                "reaction_steps": reaction_steps,
+                "branching_reaction_nodes": branching_reaction_nodes,
+                "terminal_molecules": terminal_molecules,
+                "terminal_in_stock": terminal_in_stock,
             },
             metadata={
                 "route_set": route_set,
