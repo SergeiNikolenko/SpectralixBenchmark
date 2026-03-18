@@ -185,6 +185,48 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --judge-structured-retries 2
 ```
 
+## `benchmark_v3` Eval Workflow
+
+The `benchmark_v3` eval ladder lives in:
+
+- `benchmark/level_a_eval.jsonl`
+- `benchmark/level_b_eval.jsonl`
+- `benchmark/level_c_eval.jsonl`
+
+The current evaluation runtime still uses the legacy benchmark contract, so
+materialize the eval subsets first:
+
+```bash
+uv run python -m scripts.evaluation.materialize_benchmark_v3_eval \
+  --output benchmark/benchmark_v3_eval.jsonl
+```
+
+Then run the matrix evaluation against the materialized file:
+
+```bash
+uv run python -m scripts.evaluation.run_full_matrix \
+  --benchmark-path benchmark/benchmark_v3_eval.jsonl \
+  --api-base-url "http://127.0.0.1:8317/v1" \
+  --api-key "ccs-internal-managed" \
+  --models gpt-5.4-mini \
+  --judge-model gpt-5.4 \
+  --judge-model-url "http://127.0.0.1:8317/v1" \
+  --judge-api-key "ccs-internal-managed" \
+  --judge-method g_eval \
+  --judge-g-eval-fallback-structured true \
+  --judge-reasoning-effort medium \
+  --agent-sandbox local \
+  --trace-log-enabled true
+```
+
+Notes:
+
+- `--agent-sandbox docker` remains the default and is preferred for integrity.
+- `--agent-sandbox local` is the practical fallback when Docker is unavailable.
+- Current `/v1/models` availability should be checked before long runs. In this environment
+  the local `ccs` endpoint exposes `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`,
+  `gpt-5.2-codex`, `gpt-5-codex-mini`, and related `gpt-5.x` variants.
+
 ## Output Contracts
 
 Student output (`student_output.jsonl`) schema is stable:

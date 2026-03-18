@@ -83,7 +83,44 @@ If this fails, start your local proxy first (example command from your setup):
 
 ```bash
 /Users/nikolenko/.ccs/cliproxy/bin/plus/cli-proxy-api-plus \
+  -standalone \
   -config /Users/nikolenko/.ccs/cliproxy/config.yaml
+```
+
+## `benchmark_v3` Eval Run
+
+The `benchmark_v3` ladder uses:
+
+- `benchmark/level_a_eval.jsonl`
+- `benchmark/level_b_eval.jsonl`
+- `benchmark/level_c_eval.jsonl`
+
+The current student/judge runtime still expects the legacy evaluation contract
+(`question_text`, `answer_type`, `canonical_answer`, `max_score`), so first
+materialize the `benchmark_v3` eval subsets into one evaluation file:
+
+```bash
+uv run python -m scripts.evaluation.materialize_benchmark_v3_eval \
+  --output benchmark/benchmark_v3_eval.jsonl
+```
+
+Then run the matrix pipeline against that materialized benchmark. If Docker is
+not available locally, use `--agent-sandbox local` for debugging runs.
+
+```bash
+uv run python -m scripts.evaluation.run_full_matrix \
+  --benchmark-path benchmark/benchmark_v3_eval.jsonl \
+  --api-base-url "$API_BASE_URL" \
+  --api-key "$CLIPROXY_API_KEY" \
+  --models gpt-5.4-mini \
+  --judge-model gpt-5.4 \
+  --judge-model-url "$API_BASE_URL" \
+  --judge-api-key "$CLIPROXY_API_KEY" \
+  --judge-method g_eval \
+  --judge-g-eval-fallback-structured true \
+  --judge-reasoning-effort medium \
+  --agent-sandbox local \
+  --trace-log-enabled true
 ```
 
 ## Evaluation Quick Start
