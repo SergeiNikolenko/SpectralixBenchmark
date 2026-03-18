@@ -22,6 +22,18 @@ STUDENT_COMPLETION_RULES = (
     "- Before finalizing, verify that the answer is grounded in the question text and tool outputs only."
 )
 
+STUDENT_CODE_AGENT_RULES = (
+    "Code-agent execution rules:\n"
+    "- If no tool is needed, call final_answer(...) immediately instead of writing exploratory code.\n"
+    "- Never place raw chemistry answers directly in executable code.\n"
+    "- SMILES strings, precursor lists, reaction labels, and JSON answers must be passed as quoted strings to final_answer(...).\n"
+    "- Do not emit bare chemical formulas, SMILES, or natural-language answers as Python code.\n"
+    "- Bad: CCO.CN or precursor_a + precursor_b\n"
+    '- Good: final_answer("CCO.CN")\n'
+    '- Good: final_answer("precursor_a + precursor_b")\n'
+    '- Good: final_answer(\'Answer: {"steps":[...]}\')'
+)
+
 PARSER_AGENT_INSTRUCTION = (
     "You are a document parsing agent for chemistry exam pages. "
     "Return only a JSON array of parsed questions and never include markdown fences."
@@ -89,6 +101,9 @@ def build_student_task(question: Dict[str, Any]) -> str:
         "<completion_criteria>\n"
         f"{STUDENT_COMPLETION_RULES}\n"
         "</completion_criteria>\n\n"
+        "<code_agent_rules>\n"
+        f"{STUDENT_CODE_AGENT_RULES}\n"
+        "</code_agent_rules>\n\n"
         "<question>\n"
         f"{question_text}\n"
         "</question>"
