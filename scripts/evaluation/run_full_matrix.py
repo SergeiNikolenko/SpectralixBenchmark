@@ -121,6 +121,12 @@ def _summary_base_fields(row: Dict[str, Any]) -> Dict[str, Any]:
         "quality_total_score": row.get("quality_total_score"),
         "quality_max_score": row.get("quality_max_score"),
         "quality_normalized_score": row.get("quality_normalized_score"),
+        "judge_input_tokens_total": row.get("judge_input_tokens_total"),
+        "judge_output_tokens_total": row.get("judge_output_tokens_total"),
+        "judge_total_tokens_total": row.get("judge_total_tokens_total"),
+        "judge_reasoning_tokens_total": row.get("judge_reasoning_tokens_total"),
+        "judge_requests_total": row.get("judge_requests_total"),
+        "judge_tool_calls_total": row.get("judge_tool_calls_total"),
         "reliability_ok_count": row.get("reliability_ok_count"),
         "reliability_ok_rate": row.get("reliability_ok_rate"),
     }
@@ -142,6 +148,13 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         quality_normalized_score = quality_total_score / quality_max_score
     else:
         quality_normalized_score = None
+
+    judge_input_tokens_total = int(sum(int(row.get("judge_input_tokens") or 0) for row in judge_rows))
+    judge_output_tokens_total = int(sum(int(row.get("judge_output_tokens") or 0) for row in judge_rows))
+    judge_total_tokens_total = int(sum(int(row.get("judge_total_tokens") or 0) for row in judge_rows))
+    judge_reasoning_tokens_total = int(sum(int(row.get("judge_reasoning_tokens") or 0) for row in judge_rows))
+    judge_requests_total = int(sum(int(row.get("judge_requests") or 0) for row in judge_rows))
+    judge_tool_calls_total = int(sum(int(row.get("judge_tool_calls") or 0) for row in judge_rows))
 
     reliability_ok_count = 0
     infra_counts: Counter = Counter()
@@ -227,6 +240,12 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "quality_total_score": quality_total_score,
         "quality_max_score": quality_max_score,
         "quality_normalized_score": quality_normalized_score,
+        "judge_input_tokens_total": judge_input_tokens_total,
+        "judge_output_tokens_total": judge_output_tokens_total,
+        "judge_total_tokens_total": judge_total_tokens_total,
+        "judge_reasoning_tokens_total": judge_reasoning_tokens_total,
+        "judge_requests_total": judge_requests_total,
+        "judge_tool_calls_total": judge_tool_calls_total,
         "reliability_ok_count": reliability_ok_count,
         "reliability_ok_rate": reliability_ok_rate,
         "infra_error_count": dict(sorted(infra_counts.items())),
@@ -253,6 +272,12 @@ def write_summary_csv(path: Path, summary_rows: List[Dict[str, Any]]) -> None:
         "quality_total_score",
         "quality_max_score",
         "quality_normalized_score",
+        "judge_input_tokens_total",
+        "judge_output_tokens_total",
+        "judge_total_tokens_total",
+        "judge_reasoning_tokens_total",
+        "judge_requests_total",
+        "judge_tool_calls_total",
         "reliability_ok_count",
         "reliability_ok_rate",
     ] + [f"infra_error_count.{key}" for key in infra_keys]

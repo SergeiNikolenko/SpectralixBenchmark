@@ -8,6 +8,7 @@ from pydantic_ai import Agent, ModelRetry, UnexpectedModelBehavior
 from .models import build_openai_chat_model
 from .retry import run_with_retries
 from .schemas import GEvalJudgeResult
+from .usage import extract_run_usage
 
 
 G_EVAL_SYSTEM_PROMPT = (
@@ -42,7 +43,7 @@ def run_g_eval_judge(
         output_retries=max(0, int(retries)),
     )
 
-    def _invoke() -> GEvalJudgeResult:
+    def _invoke() -> Dict[str, Any]:
         result = agent.run_sync(
             user_prompt,
             model_settings={
@@ -56,22 +57,28 @@ def run_g_eval_judge(
             raise ValueError("G-Eval judge output has unexpected type")
         if not output.step_findings:
             raise ModelRetry("G-Eval judge returned no step findings")
-        return output
+        return {
+            "output": output,
+            "usage": extract_run_usage(result),
+        }
 
     started_at = time.perf_counter()
-    output = run_with_retries(
+    result_payload = run_with_retries(
         _invoke,
         retries=max(0, int(retries)),
         retry_on=(ModelRetry, UnexpectedModelBehavior, ValueError),
         backoff_sec=0.0,
     )
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    output: GEvalJudgeResult = result_payload["output"]
+    usage = result_payload.get("usage") or {}
 
     return {
         "llm_score": float(output.rubric_score_0_to_10) / 10.0,
         "llm_comment": str(output.llm_comment),
         "judge_request_id": None,
         "judge_latency_ms": elapsed_ms,
+        **usage,
         "g_eval_trace": {
             "criteria_steps": list(output.criteria_steps),
             "step_findings": list(output.step_findings),

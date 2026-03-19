@@ -335,6 +335,13 @@ def _build_llm_success_output(
         "judge_model": model_name,
         "judge_request_id": judge_result.get("judge_request_id"),
         "judge_latency_ms": judge_result.get("judge_latency_ms"),
+        "judge_input_tokens": judge_result.get("judge_input_tokens"),
+        "judge_output_tokens": judge_result.get("judge_output_tokens"),
+        "judge_total_tokens": judge_result.get("judge_total_tokens"),
+        "judge_reasoning_tokens": judge_result.get("judge_reasoning_tokens"),
+        "judge_requests": judge_result.get("judge_requests"),
+        "judge_tool_calls": judge_result.get("judge_tool_calls"),
+        "judge_usage_details": judge_result.get("judge_usage_details"),
         "row_status": "ok",
     }
 
@@ -401,6 +408,13 @@ def _build_llm_error_output(
         "max_score": max_score,
         "score_method": "llm_judge",
         "judge_model": model_name,
+        "judge_input_tokens": None,
+        "judge_output_tokens": None,
+        "judge_total_tokens": None,
+        "judge_reasoning_tokens": None,
+        "judge_requests": None,
+        "judge_tool_calls": None,
+        "judge_usage_details": None,
         "row_status": "judge_error",
     }
 
@@ -456,6 +470,12 @@ def _append_judge_trace(
         "max_score": judge_output.get("max_score"),
         "judge_latency_ms": judge_output.get("judge_latency_ms"),
         "judge_request_id": judge_output.get("judge_request_id"),
+        "judge_input_tokens": judge_output.get("judge_input_tokens"),
+        "judge_output_tokens": judge_output.get("judge_output_tokens"),
+        "judge_total_tokens": judge_output.get("judge_total_tokens"),
+        "judge_reasoning_tokens": judge_output.get("judge_reasoning_tokens"),
+        "judge_requests": judge_output.get("judge_requests"),
+        "judge_tool_calls": judge_output.get("judge_tool_calls"),
         "llm_comment": judge_output.get("llm_comment"),
     }
     input_snapshot = {
