@@ -19,7 +19,8 @@ STUDENT_COMPLETION_RULES = (
     "Completion criteria:\n"
     "- The final answer must match the requested answer_type format exactly.\n"
     "- Do not output markdown fences, multiple alternative answers, or hidden reasoning notes.\n"
-    "- Before finalizing, verify that the answer is grounded in the question text and tool outputs only."
+    "- Before finalizing, verify that the answer is grounded in the question text and tool outputs only.\n"
+    "- Before finalizing, check that the answer is at the correct planning depth for the task level."
 )
 
 STUDENT_CODE_AGENT_RULES = (
@@ -43,6 +44,51 @@ DEFAULT_FORMAT_INSTRUCTION = (
     "Start the response with 'Answer: <machine-readable answer>'. "
     "If needed, add a very short explanation after that line."
 )
+
+LEVEL_CONTRACTS = {
+    "a": (
+        "Level A contract:\n"
+        "- Solve only the local reaction-understanding task.\n"
+        "- If reaction center is requested, include the full local event, not a partial subset.\n"
+        "- If mechanistic class is requested, give one best-fitting class label only.\n"
+        "- Do not replace the requested local transformation with a broader reaction narrative."
+    ),
+    "b": (
+        "Level B contract:\n"
+        "- Propose immediate precursors for one retrosynthetic step only.\n"
+        "- Do not jump to earlier building blocks or a longer route.\n"
+        "- State the main disconnection explicitly.\n"
+        "- Prefer the most direct target-forming precursor set over alternative strategic routes."
+    ),
+    "c": (
+        "Level C contract:\n"
+        "- Provide a complete connected multistep route.\n"
+        "- Include key intermediates or products for each step.\n"
+        "- Do not give only a retrosynthetic idea or disconnected route fragments.\n"
+        "- Ensure the final step reaches the exact target."
+    ),
+}
+
+LEVEL_SELF_CHECKS = {
+    "a": (
+        "Level A self-check:\n"
+        "- Did I identify the exact local transformation rather than a broader story?\n"
+        "- If reaction center is requested, did I include all relevant atoms or bond changes?\n"
+        "- If a class label is requested, did I choose one best label?"
+    ),
+    "b": (
+        "Level B self-check:\n"
+        "- Are these immediate precursors rather than earlier retrosynthetic building blocks?\n"
+        "- Did I state the intended bond disconnection?\n"
+        "- Did I avoid giving a full route or multiple unrelated alternatives?"
+    ),
+    "c": (
+        "Level C self-check:\n"
+        "- Do the steps connect into a coherent route?\n"
+        "- Does each step have plausible inputs and an intermediate or product?\n"
+        "- Does the final step reach the exact target?"
+    ),
+}
 
 FORMAT_INSTRUCTIONS = {
     "single_choice": (
@@ -70,8 +116,17 @@ FORMAT_INSTRUCTIONS = {
         "Do not wrap it in code, markdown, or prose."
     ),
     "text": (
-        "Return a concise direct answer. "
-        "Do not add meta commentary about the benchmark, instructions, or hidden context."
+        "Return a direct machine-readable answer. "
+        "For single-step retrosynthesis tasks, return the immediate precursors only and state the disconnection briefly. "
+        "Do not give a longer route, earlier building blocks, or meta commentary about the benchmark, instructions, or hidden context."
+    ),
+    "reaction_description": (
+        "Return a direct machine-readable chemistry answer. "
+        "If the task asks for reaction center or mechanistic class, answer that exact local question and do not replace it with a broad reaction summary."
+    ),
+    "full_synthesis": (
+        "Return a structured route answer with connected steps, key intermediates, and the final target-reaching step. "
+        "Do not answer with only a high-level retrosynthetic idea."
     ),
 }
 
@@ -81,8 +136,20 @@ def _format_instruction(answer_type: str) -> str:
     return FORMAT_INSTRUCTIONS.get(normalized, DEFAULT_FORMAT_INSTRUCTION)
 
 
+def _level_instruction(level: str) -> str:
+    normalized = (level or "").strip().lower()
+    return LEVEL_CONTRACTS.get(normalized, "Level contract: match the requested planning depth exactly.")
+
+
+def _level_self_check(level: str) -> str:
+    normalized = (level or "").strip().lower()
+    return LEVEL_SELF_CHECKS.get(normalized, "Self-check: verify planning depth, format, and exact target match before finalizing.")
+
+
 def build_student_task(question: Dict[str, Any]) -> str:
+    level = str(question.get("level", "") or "")
     answer_type = str(question.get("answer_type", "") or "")
+    task_subtype = str(question.get("task_subtype", "") or "")
     question_text = question.get("question_text", "")
     return (
         "<role>\n"
@@ -92,15 +159,23 @@ def build_student_task(question: Dict[str, Any]) -> str:
         "Produce the best final answer for the chemistry question.\n"
         "</task>\n\n"
         "<answer_format>\n"
+        f"Benchmark level: {level}\n"
         f"Answer type: {answer_type}\n"
+        f"Task subtype: {task_subtype}\n"
         f"Required format: {_format_instruction(answer_type)}\n"
         "</answer_format>\n\n"
+        "<task_contract>\n"
+        f"{_level_instruction(level)}\n"
+        "</task_contract>\n\n"
         "<tool_rules>\n"
         f"{STUDENT_TOOL_RULES}\n"
         "</tool_rules>\n\n"
         "<completion_criteria>\n"
         f"{STUDENT_COMPLETION_RULES}\n"
         "</completion_criteria>\n\n"
+        "<pre_final_self_check>\n"
+        f"{_level_self_check(level)}\n"
+        "</pre_final_self_check>\n\n"
         "<code_agent_rules>\n"
         f"{STUDENT_CODE_AGENT_RULES}\n"
         "</code_agent_rules>\n\n"
