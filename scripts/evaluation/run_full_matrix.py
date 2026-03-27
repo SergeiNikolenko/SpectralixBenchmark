@@ -459,6 +459,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional base directory for per-model verbose JSONL outputs",
     )
     parser.add_argument(
+        "--resume-existing",
+        type=str,
+        default="false",
+        help="Resume from existing student/judge JSONL files instead of overwriting them (true/false, default: false)",
+    )
+    parser.add_argument(
         "--judge-structured-retries",
         type=int,
         default=2,
@@ -547,6 +553,7 @@ def main() -> None:
                 trace_log_dir=trace_log_dir,
                 verbose_output_enabled=verbose_output_enabled,
                 verbose_output_path=verbose_output_path,
+                resume_existing=_is_truthy(args.resume_existing),
             )
         except Exception as exc:
             _raise_model_limit_exit(
@@ -589,6 +596,7 @@ def main() -> None:
                 judge_api_key=args.judge_api_key or args.api_key,
                 trace_log_enabled=trace_log_enabled,
                 trace_log_dir=trace_log_dir,
+                resume_existing=_is_truthy(args.resume_existing),
             )
         except Exception as exc:
             _raise_model_limit_exit(

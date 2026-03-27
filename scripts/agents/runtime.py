@@ -100,6 +100,8 @@ class AgentRuntime:
         self._last_run_details: Optional[Dict[str, Any]] = None
 
     def solve_question(self, question: Dict[str, Any]) -> str:
+        # Reset the agent between benchmark rows to avoid stale context leakage.
+        self.close()
         task = build_student_task(question)
         return self._run_agent_task(task=task)
 
@@ -376,6 +378,13 @@ class AgentRuntime:
     def _classify_error(error: Exception) -> str:
         text = str(error).lower()
 
+        if (
+            "429" in text
+            or "rate limit" in text
+            or "model_cooldown" in text
+            or "cooling down" in text
+        ):
+            return "http_error"
         if "timeout" in text or "timed out" in text:
             return "timeout"
         if "401" in text or "403" in text or "unauthorized" in text or "forbidden" in text:

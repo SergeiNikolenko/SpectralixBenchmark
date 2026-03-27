@@ -18,6 +18,7 @@ STATUS_OK = "ok"
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 FALSY_VALUES = {"0", "false", "no", "n", "off"}
 MODEL_LIMIT_ERROR_MARKERS = (
+    "429",
     "insufficient_quota",
     "quota exceeded",
     "quota_exceeded",
@@ -28,6 +29,10 @@ MODEL_LIMIT_ERROR_MARKERS = (
     "credits exhausted",
     "monthly usage limit",
     "rate limit exceeded permanently",
+    "rate limit exceeded",
+    "model_cooldown",
+    "cooling down",
+    "all credentials for model",
 )
 
 
@@ -82,6 +87,10 @@ def load_benchmark_questions(benchmark_path: Path) -> List[Dict[str, Any]]:
     return questions
 
 
+def build_result_key(item: Dict[str, Any]) -> str:
+    return f"{item.get('exam_id')}/{item.get('page_id')}/{item.get('question_id')}"
+
+
 def _extract_answer_payload(raw_text: str) -> str:
     text = raw_text.strip()
     if not text:
@@ -115,7 +124,17 @@ def _normalize_sequence(text: str) -> str:
     return "; ".join(tokens)
 
 
-def normalize_student_answer(answer_type: str, raw_text: str, max_len: int = 1000) -> str:
+def _clip_text(text: str, max_len: Optional[int]) -> str:
+    if max_len is None or max_len <= 0:
+        return text
+    return text[:max_len]
+
+
+def normalize_student_answer(
+    answer_type: str,
+    raw_text: str,
+    max_len: Optional[int] = None,
+) -> str:
     payload = _extract_answer_payload(raw_text)
     if not payload:
         return ""
@@ -125,24 +144,24 @@ def normalize_student_answer(answer_type: str, raw_text: str, max_len: int = 100
     if normalized_type == "single_choice":
         tokens = re.findall(r"[A-Za-z0-9]+", payload)
         if tokens:
-            return tokens[0].strip()[:max_len]
-        return payload[:max_len]
+            return _clip_text(tokens[0].strip(), max_len)
+        return _clip_text(payload, max_len)
 
     if normalized_type in {"multiple_choice", "ordering"}:
         seq = _normalize_sequence(payload)
         if seq:
-            return seq[:max_len]
-        return _compact_whitespace(payload)[:max_len]
+            return _clip_text(seq, max_len)
+        return _clip_text(_compact_whitespace(payload), max_len)
 
     if normalized_type in {"msms_structure_prediction", "structure"}:
         for line in payload.splitlines():
             candidate = line.strip()
             if candidate:
-                return candidate[:max_len]
-        return payload[:max_len]
+                return _clip_text(candidate, max_len)
+        return _clip_text(payload, max_len)
 
     compact = _compact_whitespace(payload)
-    return compact[:max_len]
+    return _clip_text(compact, max_len)
 
 
 def _sanitize_error(error: Exception, limit: int = 240) -> str:
@@ -626,6 +645,7 @@ def run_benchmark_inference(
     trace_log_dir: Optional[Path] = None,
     verbose_output_enabled: bool = False,
     verbose_output_path: Optional[Path] = None,
+    resume_existing: bool = False,
 ):
     questions = load_benchmark_questions(benchmark_path=benchmark_path)
     if limit is not None and limit >= 0:
@@ -659,17 +679,29 @@ def run_benchmark_inference(
     if guard_mode not in {"on_failure", "always", "off"}:
         raise ValueError(f"Invalid student_guard_mode: {student_guard_mode}")
 
+    completed_keys: Set[str] = set()
+    if resume_existing and output_path.exists():
+        with output_path.open("r", encoding="utf-8") as existing_f:
+            for line in existing_f:
+                if not line.strip():
+                    continue
+                completed_keys.add(build_result_key(json.loads(line)))
+
     try:
+        output_mode = "a" if resume_existing else "w"
         verbose_context = (
-            resolved_verbose_output_path.open("w", encoding="utf-8")
+            resolved_verbose_output_path.open(output_mode, encoding="utf-8")
             if verbose_output_enabled
             else nullcontext()
         )
-        with output_path.open("w", encoding="utf-8") as f_out, verbose_context as f_verbose:
+        with output_path.open(output_mode, encoding="utf-8") as f_out, verbose_context as f_verbose:
             for line_idx, question in enumerate(
                 tqdm(questions, total=len(questions), desc="Validating student answers"),
                 start=1,
             ):
+                question_key = build_result_key(question)
+                if question_key in completed_keys:
+                    continue
                 started_at = time.perf_counter()
                 student_status = STATUS_OK
                 student_error = ""
@@ -764,6 +796,7 @@ def run_benchmark_inference(
 
                 f_out.write(json.dumps(result, ensure_ascii=False) + "\n")
                 f_out.flush()
+                completed_keys.add(question_key)
 
                 if verbose_output_enabled and f_verbose is not None:
                     verbose_result = {
@@ -934,6 +967,12 @@ if __name__ == "__main__":
         default=None,
         help="Path for extended verbose JSONL (default: <output-dir>/student_output_verbose.jsonl)",
     )
+    parser.add_argument(
+        "--resume-existing",
+        type=_str_to_bool,
+        default=False,
+        help="Append only missing questions to an existing student output JSONL (default: false)",
+    )
 
     args = parser.parse_args()
 
@@ -965,6 +1004,7 @@ if __name__ == "__main__":
             trace_log_dir=args.trace_log_dir,
             verbose_output_enabled=args.verbose_output_enabled,
             verbose_output_path=args.verbose_output_path,
+            resume_existing=args.resume_existing,
         )
     except Exception as exc:
         raise SystemExit(f"[ERROR] {exc}") from exc

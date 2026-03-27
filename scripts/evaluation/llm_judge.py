@@ -20,6 +20,7 @@ DETERMINISTIC_TYPES = {
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 FALSY_VALUES = {"0", "false", "no", "n", "off"}
 MODEL_LIMIT_ERROR_MARKERS = (
+    "429",
     "insufficient_quota",
     "quota exceeded",
     "quota_exceeded",
@@ -30,6 +31,10 @@ MODEL_LIMIT_ERROR_MARKERS = (
     "credits exhausted",
     "monthly usage limit",
     "rate limit exceeded permanently",
+    "rate limit exceeded",
+    "model_cooldown",
+    "cooling down",
+    "all credentials for model",
 )
 
 
@@ -522,6 +527,7 @@ def run_llm_judge(
     judge_api_key: Optional[str] = None,
     trace_log_enabled: bool = False,
     trace_log_dir: Optional[Path] = None,
+    resume_existing: bool = False,
 ):
     if not input_path.exists():
         raise FileNotFoundError(f"Student output file not found: {input_path}")
@@ -544,11 +550,22 @@ def run_llm_judge(
     llm_count = 0
     technical_skip_count = 0
     judge_error_count = 0
+    completed_keys = set()
 
-    with input_path.open("r", encoding="utf-8") as f_in, output_path.open("w", encoding="utf-8") as f_out:
+    if resume_existing and output_path.exists():
+        with output_path.open("r", encoding="utf-8") as existing_f:
+            for line in existing_f:
+                if not line.strip():
+                    continue
+                completed_keys.add(build_key(json.loads(line)))
+
+    output_mode = "a" if resume_existing else "w"
+    with input_path.open("r", encoding="utf-8") as f_in, output_path.open(output_mode, encoding="utf-8") as f_out:
         for line_idx, line in enumerate(tqdm(f_in, desc="Judging answers"), start=1):
             student = json.loads(line)
             key = build_key(student)
+            if key in completed_keys:
+                continue
             judge_mode = "unknown"
             judge_trace_details: Optional[Dict[str, Any]] = None
 
@@ -668,6 +685,7 @@ def run_llm_judge(
 
             f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
             f_out.flush()
+            completed_keys.add(key)
             if trace_log_enabled:
                 trace_log_path = _build_trace_log_path(resolved_trace_log_dir, student, line_idx)
                 _append_judge_trace(
@@ -759,6 +777,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional judge model URL/base URL for OpenAI-compatible endpoints",
     )
     parser.add_argument(
+        "--resume-existing",
+        type=_str_to_bool,
+        default=False,
+        help="Append only missing judged rows to an existing judge output JSONL (default: false)",
+    )
+    parser.add_argument(
         "--judge-api-key",
         type=str,
         default=None,
@@ -796,4 +820,5 @@ if __name__ == "__main__":
         judge_api_key=args.judge_api_key,
         trace_log_enabled=args.trace_log_enabled,
         trace_log_dir=args.trace_log_dir,
+        resume_existing=args.resume_existing,
     )
