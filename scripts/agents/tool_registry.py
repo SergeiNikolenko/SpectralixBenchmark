@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, List
 import json
+import subprocess
 import re
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -214,6 +216,52 @@ def json_array_validate_tool(raw_json: str) -> str:
 
 
 @tool
+def chem_python_tool(code: str, timeout_sec: int = 20) -> str:
+    """
+    Runs a short Python snippet inside the project uv environment.
+    Useful for chemistry validation, RDKit canonicalization, and small calculations.
+
+    Args:
+        code: Python code to execute. Print the final result to stdout.
+        timeout_sec: Hard timeout in seconds.
+    """
+    snippet = (code or "").strip()
+    if not snippet:
+        return json.dumps({"status": "error", "reason": "empty_code"})
+
+    workspace_dir = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+
+    try:
+        proc = subprocess.run(
+            ["uv", "run", "python", "-c", snippet],
+            cwd=str(workspace_dir),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=max(1, int(timeout_sec)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return json.dumps({"status": "error", "reason": "timeout"})
+    except Exception as exc:
+        return json.dumps({"status": "error", "reason": f"python_tool_error:{exc}"})
+
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    return json.dumps(
+        {
+            "status": "ok" if proc.returncode == 0 else "error",
+            "returncode": proc.returncode,
+            "stdout": stdout[:12000],
+            "stderr": stderr[:12000],
+        },
+        ensure_ascii=False,
+    )
+
+
+@tool
 def safe_http_get_tool(url: str, timeout_sec: int = 10) -> str:
     """
     Fetches a trusted URL only if host is allowlisted in AGENT_ALLOWED_HOSTS.
@@ -259,6 +307,7 @@ TOOL_REGISTRY = {
     "unit_convert_tool": unit_convert_tool,
     "rubric_hint_tool": rubric_hint_tool,
     "json_array_validate_tool": json_array_validate_tool,
+    "chem_python_tool": chem_python_tool,
     "safe_http_get_tool": safe_http_get_tool,
 }
 

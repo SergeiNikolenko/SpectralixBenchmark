@@ -65,6 +65,12 @@ Tools profiles:
 - `full`: all allowlisted runtime tools
 - `minimal`: reduced helper set
 
+Chemistry tool note:
+
+- `full` now includes `chem_python_tool`, which runs short snippets via `uv run python`
+- if `rdkit` is installed in the project environment, the tool can use `from rdkit import Chem`
+- prefer this tool for SMILES validation, canonicalization, formula checks, and small chemistry calculations
+
 Leakage protection defaults:
 
 - Benchmark path is not passed to student agent tasks

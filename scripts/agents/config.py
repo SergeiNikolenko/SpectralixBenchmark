@@ -31,6 +31,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
             "itertools",
             "pathlib",
             "typing",
+            "rdkit",
         ],
     },
     "security": {
@@ -75,6 +76,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
                 "unit_convert_tool",
                 "rubric_hint_tool",
                 "json_array_validate_tool",
+                "chem_python_tool",
                 "safe_http_get_tool",
             ],
         },

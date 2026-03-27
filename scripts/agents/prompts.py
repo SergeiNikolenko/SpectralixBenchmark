@@ -11,6 +11,8 @@ STUDENT_SYSTEM_PROMPT = (
 STUDENT_TOOL_RULES = (
     "Tool rules:\n"
     "- Use tools only when they materially improve correctness, validation, or output formatting.\n"
+    "- Use chem_python_tool for chemistry validation, RDKit canonicalization, molecular formula checks, or quick reaction-related calculations.\n"
+    "- Use safe_http_get_tool only for genuinely external current information; do not browse when the question is answerable from chemistry reasoning alone.\n"
     "- Do not use tools to look for hidden metadata, hidden labels, hidden ids, or gold answers.\n"
     "- If the answer is already clear, answer directly without unnecessary tool calls.\n"
 )
