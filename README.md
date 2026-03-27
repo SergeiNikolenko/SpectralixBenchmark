@@ -25,7 +25,14 @@ Primary runtime/config files:
 
 ## Benchmark Schema
 
-Primary dataset: `benchmark/benchmark_v1_0.jsonl`
+Primary evaluation entrypoint: materialized `benchmark_v3` eval file
+(`benchmark/benchmark_v3_eval.jsonl`), built from:
+
+- `benchmark/level_a_eval.jsonl`
+- `benchmark/level_b_eval.jsonl`
+- `benchmark/level_c_eval.jsonl`
+
+Legacy compatibility dataset (still supported): `benchmark/benchmark_v1_0.jsonl`
 
 ```json
 {
@@ -123,13 +130,20 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --trace-log-enabled true
 ```
 
-## Evaluation Quick Start
+## Evaluation Quick Start (`benchmark_v3`)
+
+Materialize eval input first:
+
+```bash
+uv run python -m scripts.evaluation.materialize_benchmark_v3_eval \
+  --output benchmark/benchmark_v3_eval.jsonl
+```
 
 ### 1) Student stage smoke run (5 rows)
 
 ```bash
 uv run python -m scripts.evaluation.student_validation \
-  --benchmark-path benchmark/benchmark_v1_0.jsonl \
+  --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --output-path scripts/evaluation/student_output.jsonl \
   --api-base-url "$API_BASE_URL" \
   --model-name "gpt-5-codex-mini" \
@@ -139,6 +153,7 @@ uv run python -m scripts.evaluation.student_validation \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
+  --resume-existing false \
   --limit 5
 ```
 
@@ -147,10 +162,13 @@ uv run python -m scripts.evaluation.student_validation \
 ```bash
 uv run python -m scripts.evaluation.llm_judge \
   --input-path scripts/evaluation/student_output.jsonl \
-  --gold-path benchmark/benchmark_v1_0.jsonl \
+  --gold-path benchmark/benchmark_v3_eval.jsonl \
   --judge-model "gpt-5-codex-mini" \
   --judge-model-url "$API_BASE_URL" \
   --judge-api-key "$CLIPROXY_API_KEY" \
+  --judge-method g_eval \
+  --judge-g-eval-fallback-structured true \
+  --resume-existing false \
   --judge-structured-retries 2 \
   --output-path scripts/evaluation/llm_judge_output.jsonl
 ```
@@ -159,7 +177,7 @@ uv run python -m scripts.evaluation.llm_judge \
 
 ```bash
 uv run python -m scripts.evaluation.run_full_matrix \
-  --benchmark-path benchmark/benchmark_v1_0.jsonl \
+  --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --api-base-url "$API_BASE_URL" \
   --api-key "$CLIPROXY_API_KEY" \
   --models gpt-5-codex-mini \
@@ -169,6 +187,9 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
+  --judge-method g_eval \
+  --judge-g-eval-fallback-structured true \
+  --resume-existing false \
   --judge-structured-retries 2
 ```
 
@@ -258,6 +279,16 @@ This means internet access is controlled, not unrestricted.
 - Parsing details: `scripts/parsing/README.md`
 - Architecture: `docs/architecture.md`
 - Security controls: `docs/security_runbook.md`
+
+## Judge Output Notes
+
+- `score_method` in `llm_judge_output.jsonl` explicitly indicates score source:
+  - `deterministic`
+  - `g_eval`
+  - `structured_fallback`
+  - `llm_judge`
+- With `--judge-g-eval-fallback-structured true`, open-ended rows can fall back
+  from `g_eval` to structured judge when needed.
 
 ## Contacts
 

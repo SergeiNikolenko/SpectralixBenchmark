@@ -467,6 +467,9 @@ def _append_judge_trace(
     trace_payload = {
         "line_idx": line_idx,
         "judge_mode": judge_mode,
+        "judge_contract_variant": judge_output.get("judge_contract_variant"),
+        "judge_fallback_from": judge_output.get("judge_fallback_from"),
+        "judge_fallback_to": judge_output.get("judge_fallback_to"),
         "row_status": judge_output.get("row_status"),
         "score_method": judge_output.get("score_method"),
         "judge_model": judge_output.get("judge_model"),
@@ -501,6 +504,45 @@ def _append_judge_trace(
                 "\n=== JUDGE DETAILS ===\n"
                 f"{json.dumps(judge_trace_details, ensure_ascii=False, indent=2)}\n"
             )
+
+
+def _derive_judge_contract_variant(
+    *,
+    judge_mode: str,
+    score_method: Optional[str],
+) -> str:
+    if judge_mode == "deterministic":
+        return "deterministic_v1"
+    if judge_mode == "g_eval":
+        return "g_eval_rubric_0_10_v1"
+    if judge_mode == "g_eval_fallback_structured":
+        return "structured_fallback_from_g_eval_v1"
+    if judge_mode == "llm_judge" and score_method == "llm_judge":
+        return "structured_judge_v1"
+    if judge_mode == "technical_skip":
+        return "technical_skip_v1"
+    if judge_mode == "missing_canonical":
+        return "missing_canonical_v1"
+    if judge_mode == "judge_error":
+        return "judge_error_v1"
+    return "unknown_v1"
+
+
+def _attach_contract_fields(
+    *,
+    output: Dict[str, Any],
+    judge_mode: str,
+    judge_fallback_from: Optional[str],
+    judge_fallback_to: Optional[str],
+) -> Dict[str, Any]:
+    output["judge_mode"] = judge_mode
+    output["judge_fallback_from"] = judge_fallback_from
+    output["judge_fallback_to"] = judge_fallback_to
+    output["judge_contract_variant"] = _derive_judge_contract_variant(
+        judge_mode=judge_mode,
+        score_method=output.get("score_method"),
+    )
+    return output
 
 
 def _str_to_bool(value: str) -> bool:
@@ -567,6 +609,8 @@ def run_llm_judge(
             if key in completed_keys:
                 continue
             judge_mode = "unknown"
+            judge_fallback_from: Optional[str] = None
+            judge_fallback_to: Optional[str] = None
             judge_trace_details: Optional[Dict[str, Any]] = None
 
             gold_q = gold.get(key)
@@ -647,6 +691,8 @@ def run_llm_judge(
                                         "fallback_from": "g_eval",
                                         "fallback_to": "structured",
                                     }
+                                    judge_fallback_from = "g_eval"
+                                    judge_fallback_to = "structured"
                                     score_method = "structured_fallback"
                             else:
                                 judge_result = run_structured_judge(
@@ -683,6 +729,12 @@ def run_llm_judge(
                                 llm_comment=f"Judging failed: {str(exc)[:240]}",
                             )
 
+            output = _attach_contract_fields(
+                output=output,
+                judge_mode=judge_mode,
+                judge_fallback_from=judge_fallback_from,
+                judge_fallback_to=judge_fallback_to,
+            )
             f_out.write(json.dumps(output, ensure_ascii=False) + "\n")
             f_out.flush()
             completed_keys.add(key)

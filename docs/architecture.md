@@ -50,7 +50,7 @@
   - `AgentRuntime` orchestration
   - Sandbox execution via `CodeAgent`
   - One-time Docker preflight before execution
-  - Reused agent session across questions/pages
+  - Per-question runtime reset to avoid stale context leakage across rows
   - MCP tool loading (optional)
   - Runtime error normalization
 
@@ -108,6 +108,19 @@ These values are persisted to `student_status` in output JSONL.
 - Added aliases for operational compatibility:
   - `--api-base-url`
   - `--models` (alias for `--student-models` in matrix runner)
+  - `--resume-existing` (student/judge/matrix) for append-and-continue runs
+
+## Judge Mode Semantics
+
+- Deterministic answer types are scored without LLM.
+- Open-ended answer types can use:
+  - `g_eval` (rubric-guided),
+  - fallback to structured judge when `--judge-g-eval-fallback-structured=true`.
+- `llm_judge_output.jsonl` exposes score source in `score_method` to disambiguate:
+  - `deterministic`
+  - `g_eval`
+  - `structured_fallback`
+  - `llm_judge`
 
 ## Related Docs
 

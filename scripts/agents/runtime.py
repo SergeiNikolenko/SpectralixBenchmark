@@ -235,6 +235,19 @@ class AgentRuntime:
             return None
         return json.loads(json.dumps(self._last_run_details, ensure_ascii=False))
 
+    def get_runtime_metadata(self) -> Dict[str, Any]:
+        local_tools = build_tools(self.tools_profile, self.config)
+        local_tool_names = [self._tool_name(tool) for tool in local_tools]
+        return {
+            "executor_type": self.executor_type,
+            "tools_profile": self.tools_profile,
+            "requested_base_tools": self.requested_base_tools,
+            "base_tools_enabled": self.add_base_tools,
+            "allow_network_tools": self.allow_network_tools,
+            "allowed_tool_hosts": list(self.allowed_hosts),
+            "configured_local_tools": local_tool_names,
+        }
+
     def _ensure_agent(self, code_agent_cls: Any, mcp_client_cls: Any) -> None:
         if self._agent is not None:
             return
@@ -368,6 +381,14 @@ class AgentRuntime:
                 self.logger.warning("Failed to load MCP server %s: %s", server_name, exc)
 
         return loaded_tools
+
+    @staticmethod
+    def _tool_name(tool: Any) -> str:
+        for attr in ("name", "__name__"):
+            value = getattr(tool, attr, None)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return tool.__class__.__name__
 
     @staticmethod
     def _extract_host(url: str) -> str:

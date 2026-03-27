@@ -13,7 +13,7 @@
 - Controlled by `scripts/agents/agent_config.yaml`
 - Uses `scripts/pydantic_guard/*` for structured validation/repair on top of `smolagents`
 - Docker preflight runs once before row loop (fail-fast on sandbox issues)
-- Agent session is reused across questions within one run
+- Agent runtime is reset between benchmark rows to reduce state leakage across questions
 - Student prompt hides `exam_id/page_id/question_id`; only `question_text` + `answer_type` are passed to the model
 
 ## Dependencies
@@ -92,6 +92,7 @@ Trace flags:
 - `--trace-log-dir` (default: `<output-dir>/traces`)
 - `--verbose-output-enabled` (default: `false`)
 - `--verbose-output-path` (default: `<output-dir>/student_output_verbose.jsonl`)
+- `--resume-existing` (default: `false`, append only missing rows instead of overwrite)
 
 Per-question trace logs include:
 
@@ -152,9 +153,11 @@ Judge structured flags:
 - `--judge-method` (`structured|g_eval`, default: `g_eval`)
 - `--judge-g-eval-fallback-structured` (`true|false`, default: `true`)
 - `--reasoning-effort` (`low|medium|high`, default: `high`)
+- `--resume-existing` (default: `false`, append only missing judged rows)
 
 `g_eval` mode applies only to open-ended answer types and keeps deterministic scoring for exact-match types.
 It uses rubric-guided structured judging and can fall back to the standard structured judge on failure.
+`llm_judge_output.jsonl` exposes this via `score_method` (`g_eval`, `structured_fallback`, etc.).
 
 ```bash
 uv run python -m scripts.evaluation.llm_judge \
@@ -173,6 +176,7 @@ uv run python -m scripts.evaluation.llm_judge \
 
 `run_full_matrix.py` accepts `--student-models` and alias `--models`.
 It also accepts `--api-base-url` as an alternative to `--model-url`.
+It supports `--resume-existing true|false` and forwards it to student + judge stages.
 
 ```bash
 uv run python -m scripts.evaluation.run_full_matrix \
@@ -191,7 +195,7 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --judge-structured-retries 2
 ```
 
-## `benchmark_v3` Eval Workflow
+## `benchmark_v3` Eval Workflow (Primary)
 
 The `benchmark_v3` eval ladder lives in:
 
@@ -232,6 +236,8 @@ Notes:
 - Current `/v1/models` availability should be checked before long runs. In this environment
   the local `ccs` endpoint exposes `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`,
   `gpt-5.2-codex`, `gpt-5-codex-mini`, and related `gpt-5.x` variants.
+- `benchmark/benchmark_v1_0.jsonl` remains supported as a legacy input, but
+  new benchmark reporting should use `benchmark/benchmark_v3_eval.jsonl`.
 
 ## Output Contracts
 

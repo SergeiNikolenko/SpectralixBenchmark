@@ -9,6 +9,8 @@ This page tracks benchmark and runtime quality from an agent-execution perspecti
 - Benchmark ladder model: implemented
 - Paper eval subsets: implemented
 - Smoke baseline: available
+- `benchmark_v3` materialization path: documented as primary
+- Resume mode (`--resume-existing`): available for student/judge/matrix
 
 ## Domain Grades
 
@@ -23,6 +25,7 @@ Strengths:
 Gaps:
 
 - local vs docker behavior differences are not fully benchmarked across all paths
+- tools vs tools+internet observability still needs stronger explicit per-row instrumentation
 
 ## B. Benchmark Ladder Documentation - Grade B+
 
@@ -33,8 +36,9 @@ Strengths:
 
 Gaps:
 
-- some root docs still emphasize `benchmark_v1_0.jsonl` quick-start by default
-- ladder-first quick-start is not yet fully centralized in one command path
+- legacy `benchmark_v1_0.jsonl` examples still exist for compatibility and may
+  confuse users if mixed with ladder-first reporting
+- keep `benchmark_v3_eval.jsonl` as default run/reporting entrypoint
 
 ## C. Dataset Curation Readiness - Grade B
 
@@ -61,6 +65,6 @@ Gaps:
 
 ## Prioritized Next Actions
 
-1. Align root quick-start examples to explicitly include ladder-first paths.
-2. Add a short "benchmark change checklist" for PR authors.
+1. Keep benchmark runbooks `benchmark_v3`-first and mark `benchmark_v1_0` as legacy.
+2. Add explicit quality checks for score-source mix (`g_eval` vs `structured_fallback`).
 3. Add a periodic doc freshness task (weekly) for drift detection.

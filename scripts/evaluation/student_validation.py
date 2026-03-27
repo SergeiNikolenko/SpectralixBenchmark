@@ -344,6 +344,50 @@ def _render_step_summary(compact_run_details: Optional[Dict[str, Any]]) -> str:
     return "\n".join(lines) if lines else "<empty>"
 
 
+def _extract_tool_usage_summary(compact_run_details: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    summary = {
+        "step_count": 0,
+        "steps_with_tool_calls": 0,
+        "tool_call_count": 0,
+        "tool_names": [],
+        "network_tool_names": [],
+    }
+    if not isinstance(compact_run_details, dict):
+        return summary
+
+    steps = compact_run_details.get("steps")
+    if not isinstance(steps, list):
+        return summary
+
+    tool_names: List[str] = []
+    network_tool_names: List[str] = []
+    network_markers = ("http", "web", "browser", "search", "visit", "perplexity", "gemini")
+
+    summary["step_count"] = len(steps)
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        tool_calls = step.get("tool_calls")
+        if not isinstance(tool_calls, list) or not tool_calls:
+            continue
+        summary["steps_with_tool_calls"] += 1
+        summary["tool_call_count"] += len(tool_calls)
+        for item in tool_calls:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            tool_names.append(name)
+            lowered = name.lower()
+            if any(marker in lowered for marker in network_markers):
+                network_tool_names.append(name)
+
+    summary["tool_names"] = sorted(set(tool_names))
+    summary["network_tool_names"] = sorted(set(network_tool_names))
+    return summary
+
+
 def _write_trace_log(
     *,
     trace_log_path: Path,
@@ -357,6 +401,8 @@ def _write_trace_log(
     captured_trace: str,
     compact_run_details: Optional[Dict[str, Any]],
     reasoning_summary: Optional[Dict[str, Any]],
+    runtime_metadata: Optional[Dict[str, Any]],
+    tool_usage_summary: Optional[Dict[str, Any]],
 ) -> None:
     trace_payload = {
         "exam_id": question.get("exam_id"),
@@ -367,6 +413,8 @@ def _write_trace_log(
         "student_status": student_status,
         "student_error": student_error,
         "student_elapsed_ms": elapsed_ms,
+        "runtime_metadata": runtime_metadata,
+        "tool_usage_summary": tool_usage_summary,
     }
 
     step_summary_text = _render_step_summary(compact_run_details)
@@ -663,6 +711,7 @@ def run_benchmark_inference(
             timeout_sec=timeout,
         )
         runtime.preflight()
+        runtime_metadata = runtime.get_runtime_metadata()
     except AgentRuntimeError as exc:
         raise RuntimeError(f"Agent preflight failed: {exc.status}: {exc.message}") from exc
     except Exception as exc:
@@ -709,6 +758,7 @@ def run_benchmark_inference(
                 raw_answer = ""
                 compact_run_details: Optional[Dict[str, Any]] = None
                 reasoning_summary: Optional[Dict[str, Any]] = None
+                tool_usage_summary: Optional[Dict[str, Any]] = None
                 trace_buffer = io.StringIO()
 
                 tee_stdout = _TeeStream(sys.stdout, trace_buffer)
@@ -721,6 +771,7 @@ def run_benchmark_inference(
                             max_retries=max_retries,
                         )
                         compact_run_details, reasoning_summary = _collect_run_details(runtime)
+                        tool_usage_summary = _extract_tool_usage_summary(compact_run_details)
 
                         student_answer = normalize_student_answer(
                             question.get("answer_type", ""),
@@ -749,12 +800,14 @@ def run_benchmark_inference(
                         ) from exc
                     except StudentCallError as exc:
                         compact_run_details, reasoning_summary = _collect_run_details(runtime)
+                        tool_usage_summary = _extract_tool_usage_summary(compact_run_details)
                         student_status = exc.status
                         student_error = exc.message
                         student_answer = ""
                         tqdm.write(f"[ERROR] Line {line_idx}: status={student_status} error={student_error}")
                     except Exception as exc:  # Defensive fallback
                         compact_run_details, reasoning_summary = _collect_run_details(runtime)
+                        tool_usage_summary = _extract_tool_usage_summary(compact_run_details)
                         student_status = "parse_error"
                         student_error = _sanitize_error(exc, limit=max_error_len)
                         student_answer = ""
@@ -784,6 +837,8 @@ def run_benchmark_inference(
                         captured_trace=trace_buffer.getvalue(),
                         compact_run_details=compact_run_details,
                         reasoning_summary=reasoning_summary,
+                        runtime_metadata=runtime_metadata,
+                        tool_usage_summary=tool_usage_summary,
                     )
 
                 result = _build_student_result_row(
@@ -803,6 +858,8 @@ def run_benchmark_inference(
                         **result,
                         "raw_answer": raw_answer,
                         "reasoning_summary": reasoning_summary,
+                        "runtime_metadata": runtime_metadata,
+                        "tool_usage_summary": tool_usage_summary,
                         "agent_run_details": compact_run_details,
                         "trace_log_path": str(trace_log_path) if trace_log_path else None,
                     }

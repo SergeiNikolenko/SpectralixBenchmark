@@ -2,6 +2,7 @@ import argparse
 import csv
 import json
 import re
+import subprocess
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,28 @@ MODEL_LIMIT_ERROR_MARKERS = (
     "monthly usage limit",
     "model limit exceeded",
 )
+
+
+def _now_utc_iso() -> str:
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+
+def _detect_git_commit(repo_dir: Path) -> Optional[str]:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(repo_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    commit = (result.stdout or "").strip()
+    return commit or None
 
 
 def sanitize_model_name(model_name: str) -> str:
@@ -121,6 +144,7 @@ def _summary_base_fields(row: Dict[str, Any]) -> Dict[str, Any]:
         "quality_total_score": row.get("quality_total_score"),
         "quality_max_score": row.get("quality_max_score"),
         "quality_normalized_score": row.get("quality_normalized_score"),
+        "quality_end_to_end_score": row.get("quality_end_to_end_score"),
         "judge_input_tokens_total": row.get("judge_input_tokens_total"),
         "judge_output_tokens_total": row.get("judge_output_tokens_total"),
         "judge_total_tokens_total": row.get("judge_total_tokens_total"),
@@ -143,11 +167,17 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     quality_total_score = float(sum(float(row.get("final_score", 0) or 0) for row in quality_rows))
     quality_max_score = float(sum(float(row.get("max_score", 0) or 0) for row in quality_rows))
+    end_to_end_max_score = float(sum(float(row.get("max_score", 0) or 0) for row in judge_rows))
     quality_normalized_score: Optional[float]
     if quality_max_score > 0:
         quality_normalized_score = quality_total_score / quality_max_score
     else:
         quality_normalized_score = None
+    quality_end_to_end_score: Optional[float]
+    if end_to_end_max_score > 0:
+        quality_end_to_end_score = quality_total_score / end_to_end_max_score
+    else:
+        quality_end_to_end_score = None
 
     judge_input_tokens_total = int(sum(int(row.get("judge_input_tokens") or 0) for row in judge_rows))
     judge_output_tokens_total = int(sum(int(row.get("judge_output_tokens") or 0) for row in judge_rows))
@@ -240,6 +270,7 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "quality_total_score": quality_total_score,
         "quality_max_score": quality_max_score,
         "quality_normalized_score": quality_normalized_score,
+        "quality_end_to_end_score": quality_end_to_end_score,
         "judge_input_tokens_total": judge_input_tokens_total,
         "judge_output_tokens_total": judge_output_tokens_total,
         "judge_total_tokens_total": judge_total_tokens_total,
@@ -272,6 +303,7 @@ def write_summary_csv(path: Path, summary_rows: List[Dict[str, Any]]) -> None:
         "quality_total_score",
         "quality_max_score",
         "quality_normalized_score",
+        "quality_end_to_end_score",
         "judge_input_tokens_total",
         "judge_output_tokens_total",
         "judge_total_tokens_total",
@@ -507,12 +539,58 @@ def main() -> None:
 
     run_dir = args.output_root / args.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    repo_root = Path(__file__).resolve().parents[2]
+    git_commit = _detect_git_commit(repo_root)
 
     summary_rows: List[Dict[str, Any]] = []
     student_guard_enabled = _is_truthy(args.student_guard_enabled)
     trace_log_enabled = _is_truthy(args.trace_log_enabled)
     verbose_output_enabled = _is_truthy(args.verbose_output_enabled)
     judge_g_eval_fallback_structured = _is_truthy(args.judge_g_eval_fallback_structured)
+    resume_existing = _is_truthy(args.resume_existing)
+
+    run_manifest_path = run_dir / "run_manifest.json"
+    run_manifest: Dict[str, Any] = {
+        "run_id": args.run_id,
+        "status": "running",
+        "started_at_utc": _now_utc_iso(),
+        "updated_at_utc": _now_utc_iso(),
+        "finished_at_utc": None,
+        "git_commit": git_commit,
+        "benchmark_path": str(args.benchmark_path),
+        "output_root": str(args.output_root),
+        "run_dir": str(run_dir),
+        "student_models": list(args.student_models),
+        "judge_model": args.judge_model,
+        "model_url": args.model_url,
+        "api_base_url": args.api_base_url,
+        "judge_model_url": args.judge_model_url,
+        "settings": {
+            "timeout": args.timeout,
+            "max_retries": args.max_retries,
+            "limit": args.limit,
+            "agent_max_steps": args.agent_max_steps,
+            "agent_sandbox": args.agent_sandbox,
+            "agent_tools_profile": args.agent_tools_profile,
+            "agent_config": str(args.agent_config),
+            "judge_max_tokens": args.judge_max_tokens,
+            "judge_temperature": args.judge_temperature,
+            "judge_reasoning_effort": args.judge_reasoning_effort,
+            "judge_structured_retries": args.judge_structured_retries,
+            "judge_method": args.judge_method,
+            "judge_g_eval_fallback_structured": judge_g_eval_fallback_structured,
+            "student_guard_enabled": student_guard_enabled,
+            "student_guard_mode": args.student_guard_mode,
+            "student_guard_retries": args.student_guard_retries,
+            "trace_log_enabled": trace_log_enabled,
+            "trace_log_dir": str(args.trace_log_dir) if args.trace_log_dir else None,
+            "verbose_output_enabled": verbose_output_enabled,
+            "verbose_output_dir": str(args.verbose_output_dir) if args.verbose_output_dir else None,
+            "resume_existing": resume_existing,
+        },
+        "models": [],
+    }
+    write_json(run_manifest_path, run_manifest)
 
     for model_name in args.student_models:
         model_slug = sanitize_model_name(model_name)
@@ -532,6 +610,40 @@ def main() -> None:
             if args.verbose_output_dir
             else (model_dir / "student_output_verbose.jsonl")
         )
+        model_manifest_path = model_dir / "run_manifest.json"
+        model_manifest: Dict[str, Any] = {
+            "run_id": args.run_id,
+            "model_name": model_name,
+            "model_slug": model_slug,
+            "status": "running",
+            "started_at_utc": _now_utc_iso(),
+            "updated_at_utc": _now_utc_iso(),
+            "finished_at_utc": None,
+            "git_commit": git_commit,
+            "benchmark_path": str(args.benchmark_path),
+            "student_output_path": str(student_output_path),
+            "judge_output_path": str(judge_output_path),
+            "metrics_path": str(metrics_path),
+            "breakdown_path": str(breakdown_path),
+            "errors_sample_path": str(errors_sample_path),
+            "trace_log_dir": str(trace_log_dir),
+            "verbose_output_path": str(verbose_output_path),
+            "settings": {
+                "agent_sandbox": args.agent_sandbox,
+                "agent_tools_profile": args.agent_tools_profile,
+                "agent_config": str(args.agent_config),
+                "judge_model": args.judge_model,
+                "judge_reasoning_effort": args.judge_reasoning_effort,
+                "resume_existing": resume_existing,
+                "trace_log_enabled": trace_log_enabled,
+            },
+            "stages": {
+                "student": {"status": "running", "started_at_utc": _now_utc_iso(), "finished_at_utc": None},
+                "judge": {"status": "pending", "started_at_utc": None, "finished_at_utc": None},
+                "metrics": {"status": "pending", "started_at_utc": None, "finished_at_utc": None},
+            },
+        }
+        write_json(model_manifest_path, model_manifest)
         try:
             run_benchmark_inference(
                 benchmark_path=args.benchmark_path,
@@ -553,17 +665,33 @@ def main() -> None:
                 trace_log_dir=trace_log_dir,
                 verbose_output_enabled=verbose_output_enabled,
                 verbose_output_path=verbose_output_path,
-                resume_existing=_is_truthy(args.resume_existing),
+                resume_existing=resume_existing,
             )
         except Exception as exc:
+            model_manifest["status"] = "failed"
+            model_manifest["updated_at_utc"] = _now_utc_iso()
+            model_manifest["finished_at_utc"] = _now_utc_iso()
+            model_manifest["stages"]["student"]["status"] = "failed"
+            model_manifest["stages"]["student"]["finished_at_utc"] = _now_utc_iso()
+            model_manifest["error"] = str(exc)[:500]
+            write_json(model_manifest_path, model_manifest)
             _raise_model_limit_exit(
                 "[ERROR] Model limit exceeded during student stage; run aborted. "
                 f"model={model_name}",
                 exc,
             )
             raise
+        model_manifest["stages"]["student"]["status"] = "completed"
+        model_manifest["stages"]["student"]["finished_at_utc"] = _now_utc_iso()
+        model_manifest["stages"]["judge"]["status"] = "running"
+        model_manifest["stages"]["judge"]["started_at_utc"] = _now_utc_iso()
+        model_manifest["updated_at_utc"] = _now_utc_iso()
+        write_json(model_manifest_path, model_manifest)
 
         student_rows = read_jsonl(student_output_path)
+        model_manifest["student_rows"] = len(student_rows)
+        model_manifest["updated_at_utc"] = _now_utc_iso()
+        write_json(model_manifest_path, model_manifest)
         if not student_rows:
             print(
                 f"[WARN] No rows were produced for model={model_name}. "
@@ -574,6 +702,15 @@ def main() -> None:
             write_json(breakdown_path, {})
             write_json(errors_sample_path, [])
             summary_rows.append(skipped_row)
+            model_manifest["stages"]["judge"]["status"] = "skipped"
+            model_manifest["stages"]["judge"]["finished_at_utc"] = _now_utc_iso()
+            model_manifest["stages"]["metrics"]["status"] = "completed"
+            model_manifest["stages"]["metrics"]["started_at_utc"] = _now_utc_iso()
+            model_manifest["stages"]["metrics"]["finished_at_utc"] = _now_utc_iso()
+            model_manifest["status"] = "completed"
+            model_manifest["finished_at_utc"] = _now_utc_iso()
+            model_manifest["updated_at_utc"] = _now_utc_iso()
+            write_json(model_manifest_path, model_manifest)
             continue
 
         print(
@@ -596,17 +733,31 @@ def main() -> None:
                 judge_api_key=args.judge_api_key or args.api_key,
                 trace_log_enabled=trace_log_enabled,
                 trace_log_dir=trace_log_dir,
-                resume_existing=_is_truthy(args.resume_existing),
+                resume_existing=resume_existing,
             )
         except Exception as exc:
+            model_manifest["status"] = "failed"
+            model_manifest["updated_at_utc"] = _now_utc_iso()
+            model_manifest["finished_at_utc"] = _now_utc_iso()
+            model_manifest["stages"]["judge"]["status"] = "failed"
+            model_manifest["stages"]["judge"]["finished_at_utc"] = _now_utc_iso()
+            model_manifest["error"] = str(exc)[:500]
+            write_json(model_manifest_path, model_manifest)
             _raise_model_limit_exit(
                 "[ERROR] Model limit exceeded during judge stage; run aborted. "
                 f"student_model={model_name}; judge_model={args.judge_model}",
                 exc,
             )
             raise
+        model_manifest["stages"]["judge"]["status"] = "completed"
+        model_manifest["stages"]["judge"]["finished_at_utc"] = _now_utc_iso()
+        model_manifest["stages"]["metrics"]["status"] = "running"
+        model_manifest["stages"]["metrics"]["started_at_utc"] = _now_utc_iso()
+        model_manifest["updated_at_utc"] = _now_utc_iso()
+        write_json(model_manifest_path, model_manifest)
 
         judge_rows = read_jsonl(judge_output_path)
+        model_manifest["judge_rows"] = len(judge_rows)
         metrics = compute_metrics(judge_rows)
         metrics.update(
             {
@@ -631,6 +782,14 @@ def main() -> None:
             errors_sample_path,
             (metrics.get("errors_sample") or [])[: max(args.error_sample_size, 0)],
         )
+        model_manifest["stages"]["metrics"]["status"] = "completed"
+        model_manifest["stages"]["metrics"]["finished_at_utc"] = _now_utc_iso()
+        model_manifest["status"] = "completed"
+        model_manifest["finished_at_utc"] = _now_utc_iso()
+        model_manifest["updated_at_utc"] = _now_utc_iso()
+        model_manifest["quality_normalized_score"] = metrics.get("quality_normalized_score")
+        model_manifest["reliability_ok_rate"] = metrics.get("reliability_ok_rate")
+        write_json(model_manifest_path, model_manifest)
 
         summary_rows.append(
             _build_summary_row(
@@ -640,15 +799,36 @@ def main() -> None:
                 metrics_path=metrics_path,
             )
         )
+        run_manifest["models"].append(
+            {
+                "model_name": model_name,
+                "model_slug": model_slug,
+                "status": model_manifest.get("status"),
+                "student_rows": model_manifest.get("student_rows"),
+                "judge_rows": model_manifest.get("judge_rows"),
+                "quality_normalized_score": model_manifest.get("quality_normalized_score"),
+                "reliability_ok_rate": model_manifest.get("reliability_ok_rate"),
+                "model_manifest_path": str(model_manifest_path),
+            }
+        )
+        run_manifest["updated_at_utc"] = _now_utc_iso()
+        write_json(run_manifest_path, run_manifest)
 
     summary_json_path = run_dir / "summary.json"
     summary_csv_path = run_dir / "summary.csv"
 
     write_json(summary_json_path, summary_rows)
     write_summary_csv(summary_csv_path, summary_rows)
+    run_manifest["status"] = "completed"
+    run_manifest["finished_at_utc"] = _now_utc_iso()
+    run_manifest["updated_at_utc"] = _now_utc_iso()
+    run_manifest["summary_json_path"] = str(summary_json_path)
+    run_manifest["summary_csv_path"] = str(summary_csv_path)
+    write_json(run_manifest_path, run_manifest)
 
     print(f"[INFO] Summary JSON written to: {summary_json_path}")
     print(f"[INFO] Summary CSV written to: {summary_csv_path}")
+    print(f"[INFO] Run manifest written to: {run_manifest_path}")
 
 
 if __name__ == "__main__":
