@@ -55,6 +55,24 @@ def build_key(item: Dict[str, Any]) -> str:
     return f"{item.get('exam_id')}/{item.get('page_id')}/{item.get('question_id')}"
 
 
+def _load_completed_keys_from_jsonl(path: Path) -> set[str]:
+    completed_keys: set[str] = set()
+    with path.open("r", encoding="utf-8") as existing_f:
+        for line_idx, line in enumerate(existing_f, start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                tqdm.write(
+                    f"[WARN] Skipping malformed existing JSONL row at {path}:{line_idx} "
+                    "(likely truncated tail during prior interrupted run)"
+                )
+                continue
+            completed_keys.add(build_key(payload))
+    return completed_keys
+
+
 def _clean_text(value: Any) -> str:
     text = str(value or "").strip()
     text = text.replace("```", "")
@@ -595,11 +613,7 @@ def run_llm_judge(
     completed_keys = set()
 
     if resume_existing and output_path.exists():
-        with output_path.open("r", encoding="utf-8") as existing_f:
-            for line in existing_f:
-                if not line.strip():
-                    continue
-                completed_keys.add(build_key(json.loads(line)))
+        completed_keys = _load_completed_keys_from_jsonl(output_path)
 
     output_mode = "a" if resume_existing else "w"
     with input_path.open("r", encoding="utf-8") as f_in, output_path.open(output_mode, encoding="utf-8") as f_out:

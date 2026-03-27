@@ -91,6 +91,24 @@ def build_result_key(item: Dict[str, Any]) -> str:
     return f"{item.get('exam_id')}/{item.get('page_id')}/{item.get('question_id')}"
 
 
+def _load_completed_keys_from_jsonl(path: Path) -> Set[str]:
+    completed_keys: Set[str] = set()
+    with path.open("r", encoding="utf-8") as existing_f:
+        for line_idx, line in enumerate(existing_f, start=1):
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                tqdm.write(
+                    f"[WARN] Skipping malformed existing JSONL row at {path}:{line_idx} "
+                    "(likely truncated tail during prior interrupted run)"
+                )
+                continue
+            completed_keys.add(build_result_key(payload))
+    return completed_keys
+
+
 def _extract_answer_payload(raw_text: str) -> str:
     text = raw_text.strip()
     if not text:
@@ -553,6 +571,14 @@ def _collect_run_details(
     return _compact_run_details(run_details), _extract_reasoning_summary(run_details)
 
 
+def _collect_runtime_debug_payload(
+    runtime: AgentRuntime,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]], Dict[str, Any]]:
+    compact_run_details, reasoning_summary = _collect_run_details(runtime)
+    tool_usage_summary = _extract_tool_usage_summary(compact_run_details)
+    return compact_run_details, reasoning_summary, tool_usage_summary
+
+
 def _maybe_apply_student_guard(
     *,
     question: Dict[str, Any],
@@ -730,11 +756,7 @@ def run_benchmark_inference(
 
     completed_keys: Set[str] = set()
     if resume_existing and output_path.exists():
-        with output_path.open("r", encoding="utf-8") as existing_f:
-            for line in existing_f:
-                if not line.strip():
-                    continue
-                completed_keys.add(build_result_key(json.loads(line)))
+        completed_keys = _load_completed_keys_from_jsonl(output_path)
 
     try:
         output_mode = "a" if resume_existing else "w"
@@ -770,8 +792,11 @@ def run_benchmark_inference(
                             question=question,
                             max_retries=max_retries,
                         )
-                        compact_run_details, reasoning_summary = _collect_run_details(runtime)
-                        tool_usage_summary = _extract_tool_usage_summary(compact_run_details)
+                        (
+                            compact_run_details,
+                            reasoning_summary,
+                            tool_usage_summary,
+                        ) = _collect_runtime_debug_payload(runtime)
 
                         student_answer = normalize_student_answer(
                             question.get("answer_type", ""),
@@ -799,15 +824,21 @@ def run_benchmark_inference(
                             f"reason={_sanitize_error(exc)}"
                         ) from exc
                     except StudentCallError as exc:
-                        compact_run_details, reasoning_summary = _collect_run_details(runtime)
-                        tool_usage_summary = _extract_tool_usage_summary(compact_run_details)
+                        (
+                            compact_run_details,
+                            reasoning_summary,
+                            tool_usage_summary,
+                        ) = _collect_runtime_debug_payload(runtime)
                         student_status = exc.status
                         student_error = exc.message
                         student_answer = ""
                         tqdm.write(f"[ERROR] Line {line_idx}: status={student_status} error={student_error}")
                     except Exception as exc:  # Defensive fallback
-                        compact_run_details, reasoning_summary = _collect_run_details(runtime)
-                        tool_usage_summary = _extract_tool_usage_summary(compact_run_details)
+                        (
+                            compact_run_details,
+                            reasoning_summary,
+                            tool_usage_summary,
+                        ) = _collect_runtime_debug_payload(runtime)
                         student_status = "parse_error"
                         student_error = _sanitize_error(exc, limit=max_error_len)
                         student_answer = ""

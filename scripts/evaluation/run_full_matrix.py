@@ -592,227 +592,248 @@ def main() -> None:
     }
     write_json(run_manifest_path, run_manifest)
 
-    for model_name in args.student_models:
-        model_slug = sanitize_model_name(model_name)
-        model_dir = run_dir / model_slug
-        model_dir.mkdir(parents=True, exist_ok=True)
-
-        student_output_path = model_dir / "student_output.jsonl"
-        judge_output_path = model_dir / "llm_judge_output.jsonl"
-        metrics_path = model_dir / "metrics.json"
-        breakdown_path = model_dir / "breakdown_by_answer_type.json"
-        errors_sample_path = model_dir / "errors_sample.json"
-
-        print(f"[INFO] Running student inference for model={model_name}")
-        trace_log_dir = (args.trace_log_dir / model_slug) if args.trace_log_dir else (model_dir / "traces")
-        verbose_output_path = (
-            (args.verbose_output_dir / model_slug / "student_output_verbose.jsonl")
-            if args.verbose_output_dir
-            else (model_dir / "student_output_verbose.jsonl")
-        )
-        model_manifest_path = model_dir / "run_manifest.json"
-        model_manifest: Dict[str, Any] = {
-            "run_id": args.run_id,
-            "model_name": model_name,
-            "model_slug": model_slug,
-            "status": "running",
-            "started_at_utc": _now_utc_iso(),
-            "updated_at_utc": _now_utc_iso(),
-            "finished_at_utc": None,
-            "git_commit": git_commit,
-            "benchmark_path": str(args.benchmark_path),
-            "student_output_path": str(student_output_path),
-            "judge_output_path": str(judge_output_path),
-            "metrics_path": str(metrics_path),
-            "breakdown_path": str(breakdown_path),
-            "errors_sample_path": str(errors_sample_path),
-            "trace_log_dir": str(trace_log_dir),
-            "verbose_output_path": str(verbose_output_path),
-            "settings": {
-                "agent_sandbox": args.agent_sandbox,
-                "agent_tools_profile": args.agent_tools_profile,
-                "agent_config": str(args.agent_config),
-                "judge_model": args.judge_model,
-                "judge_reasoning_effort": args.judge_reasoning_effort,
-                "resume_existing": resume_existing,
-                "trace_log_enabled": trace_log_enabled,
-            },
-            "stages": {
-                "student": {"status": "running", "started_at_utc": _now_utc_iso(), "finished_at_utc": None},
-                "judge": {"status": "pending", "started_at_utc": None, "finished_at_utc": None},
-                "metrics": {"status": "pending", "started_at_utc": None, "finished_at_utc": None},
-            },
+    def _record_model_manifest(model_manifest: Dict[str, Any], model_manifest_path: Path) -> None:
+        write_json(model_manifest_path, model_manifest)
+        model_entry = {
+            "model_name": model_manifest.get("model_name"),
+            "model_slug": model_manifest.get("model_slug"),
+            "status": model_manifest.get("status"),
+            "student_rows": model_manifest.get("student_rows"),
+            "judge_rows": model_manifest.get("judge_rows"),
+            "quality_normalized_score": model_manifest.get("quality_normalized_score"),
+            "reliability_ok_rate": model_manifest.get("reliability_ok_rate"),
+            "model_manifest_path": str(model_manifest_path),
         }
-        write_json(model_manifest_path, model_manifest)
-        try:
-            run_benchmark_inference(
-                benchmark_path=args.benchmark_path,
-                output_path=student_output_path,
-                model_url=model_url,
-                model_name=model_name,
-                api_key=args.api_key,
-                timeout=args.timeout,
-                max_retries=args.max_retries,
-                limit=args.limit,
-                agent_max_steps=args.agent_max_steps,
-                agent_sandbox=args.agent_sandbox,
-                agent_tools_profile=args.agent_tools_profile,
-                agent_config=args.agent_config,
-                student_guard_enabled=student_guard_enabled,
-                student_guard_mode=args.student_guard_mode,
-                student_guard_retries=args.student_guard_retries,
-                trace_log_enabled=trace_log_enabled,
-                trace_log_dir=trace_log_dir,
-                verbose_output_enabled=verbose_output_enabled,
-                verbose_output_path=verbose_output_path,
-                resume_existing=resume_existing,
-            )
-        except Exception as exc:
-            model_manifest["status"] = "failed"
-            model_manifest["updated_at_utc"] = _now_utc_iso()
-            model_manifest["finished_at_utc"] = _now_utc_iso()
-            model_manifest["stages"]["student"]["status"] = "failed"
-            model_manifest["stages"]["student"]["finished_at_utc"] = _now_utc_iso()
-            model_manifest["error"] = str(exc)[:500]
-            write_json(model_manifest_path, model_manifest)
-            _raise_model_limit_exit(
-                "[ERROR] Model limit exceeded during student stage; run aborted. "
-                f"model={model_name}",
-                exc,
-            )
-            raise
-        model_manifest["stages"]["student"]["status"] = "completed"
-        model_manifest["stages"]["student"]["finished_at_utc"] = _now_utc_iso()
-        model_manifest["stages"]["judge"]["status"] = "running"
-        model_manifest["stages"]["judge"]["started_at_utc"] = _now_utc_iso()
-        model_manifest["updated_at_utc"] = _now_utc_iso()
-        write_json(model_manifest_path, model_manifest)
+        existing_models = run_manifest.get("models") or []
+        replaced = False
+        for idx, existing in enumerate(existing_models):
+            if existing.get("model_slug") == model_entry["model_slug"]:
+                existing_models[idx] = model_entry
+                replaced = True
+                break
+        if not replaced:
+            existing_models.append(model_entry)
+        run_manifest["models"] = existing_models
+        run_manifest["updated_at_utc"] = _now_utc_iso()
+        write_json(run_manifest_path, run_manifest)
 
-        student_rows = read_jsonl(student_output_path)
-        model_manifest["student_rows"] = len(student_rows)
-        model_manifest["updated_at_utc"] = _now_utc_iso()
-        write_json(model_manifest_path, model_manifest)
-        if not student_rows:
-            print(
-                f"[WARN] No rows were produced for model={model_name}. "
-                "Skipping judging and metrics."
+    try:
+        for model_name in args.student_models:
+            model_slug = sanitize_model_name(model_name)
+            model_dir = run_dir / model_slug
+            model_dir.mkdir(parents=True, exist_ok=True)
+
+            student_output_path = model_dir / "student_output.jsonl"
+            judge_output_path = model_dir / "llm_judge_output.jsonl"
+            metrics_path = model_dir / "metrics.json"
+            breakdown_path = model_dir / "breakdown_by_answer_type.json"
+            errors_sample_path = model_dir / "errors_sample.json"
+
+            print(f"[INFO] Running student inference for model={model_name}")
+            trace_log_dir = (args.trace_log_dir / model_slug) if args.trace_log_dir else (model_dir / "traces")
+            verbose_output_path = (
+                (args.verbose_output_dir / model_slug / "student_output_verbose.jsonl")
+                if args.verbose_output_dir
+                else (model_dir / "student_output_verbose.jsonl")
             )
-            skipped_row = _build_skipped_row(model_name)
-            write_json(metrics_path, skipped_row)
-            write_json(breakdown_path, {})
-            write_json(errors_sample_path, [])
-            summary_rows.append(skipped_row)
-            model_manifest["stages"]["judge"]["status"] = "skipped"
+            model_manifest_path = model_dir / "run_manifest.json"
+            model_manifest: Dict[str, Any] = {
+                "run_id": args.run_id,
+                "model_name": model_name,
+                "model_slug": model_slug,
+                "status": "running",
+                "started_at_utc": _now_utc_iso(),
+                "updated_at_utc": _now_utc_iso(),
+                "finished_at_utc": None,
+                "git_commit": git_commit,
+                "benchmark_path": str(args.benchmark_path),
+                "student_output_path": str(student_output_path),
+                "judge_output_path": str(judge_output_path),
+                "metrics_path": str(metrics_path),
+                "breakdown_path": str(breakdown_path),
+                "errors_sample_path": str(errors_sample_path),
+                "trace_log_dir": str(trace_log_dir),
+                "verbose_output_path": str(verbose_output_path),
+                "settings": {
+                    "agent_sandbox": args.agent_sandbox,
+                    "agent_tools_profile": args.agent_tools_profile,
+                    "agent_config": str(args.agent_config),
+                    "judge_model": args.judge_model,
+                    "judge_reasoning_effort": args.judge_reasoning_effort,
+                    "resume_existing": resume_existing,
+                    "trace_log_enabled": trace_log_enabled,
+                },
+                "stages": {
+                    "student": {"status": "running", "started_at_utc": _now_utc_iso(), "finished_at_utc": None},
+                    "judge": {"status": "pending", "started_at_utc": None, "finished_at_utc": None},
+                    "metrics": {"status": "pending", "started_at_utc": None, "finished_at_utc": None},
+                },
+            }
+            _record_model_manifest(model_manifest, model_manifest_path)
+
+            try:
+                run_benchmark_inference(
+                    benchmark_path=args.benchmark_path,
+                    output_path=student_output_path,
+                    model_url=model_url,
+                    model_name=model_name,
+                    api_key=args.api_key,
+                    timeout=args.timeout,
+                    max_retries=args.max_retries,
+                    limit=args.limit,
+                    agent_max_steps=args.agent_max_steps,
+                    agent_sandbox=args.agent_sandbox,
+                    agent_tools_profile=args.agent_tools_profile,
+                    agent_config=args.agent_config,
+                    student_guard_enabled=student_guard_enabled,
+                    student_guard_mode=args.student_guard_mode,
+                    student_guard_retries=args.student_guard_retries,
+                    trace_log_enabled=trace_log_enabled,
+                    trace_log_dir=trace_log_dir,
+                    verbose_output_enabled=verbose_output_enabled,
+                    verbose_output_path=verbose_output_path,
+                    resume_existing=resume_existing,
+                )
+            except Exception as exc:
+                model_manifest["status"] = "failed"
+                model_manifest["updated_at_utc"] = _now_utc_iso()
+                model_manifest["finished_at_utc"] = _now_utc_iso()
+                model_manifest["stages"]["student"]["status"] = "failed"
+                model_manifest["stages"]["student"]["finished_at_utc"] = _now_utc_iso()
+                model_manifest["error"] = str(exc)[:500]
+                _record_model_manifest(model_manifest, model_manifest_path)
+                _raise_model_limit_exit(
+                    "[ERROR] Model limit exceeded during student stage; run aborted. "
+                    f"model={model_name}",
+                    exc,
+                )
+                raise
+
+            model_manifest["stages"]["student"]["status"] = "completed"
+            model_manifest["stages"]["student"]["finished_at_utc"] = _now_utc_iso()
+            model_manifest["stages"]["judge"]["status"] = "running"
+            model_manifest["stages"]["judge"]["started_at_utc"] = _now_utc_iso()
+            model_manifest["updated_at_utc"] = _now_utc_iso()
+            _record_model_manifest(model_manifest, model_manifest_path)
+
+            student_rows = read_jsonl(student_output_path)
+            model_manifest["student_rows"] = len(student_rows)
+            model_manifest["updated_at_utc"] = _now_utc_iso()
+            _record_model_manifest(model_manifest, model_manifest_path)
+            if not student_rows:
+                print(
+                    f"[WARN] No rows were produced for model={model_name}. "
+                    "Skipping judging and metrics."
+                )
+                skipped_row = _build_skipped_row(model_name)
+                write_json(metrics_path, skipped_row)
+                write_json(breakdown_path, {})
+                write_json(errors_sample_path, [])
+                summary_rows.append(skipped_row)
+                model_manifest["stages"]["judge"]["status"] = "skipped"
+                model_manifest["stages"]["judge"]["finished_at_utc"] = _now_utc_iso()
+                model_manifest["stages"]["metrics"]["status"] = "completed"
+                model_manifest["stages"]["metrics"]["started_at_utc"] = _now_utc_iso()
+                model_manifest["stages"]["metrics"]["finished_at_utc"] = _now_utc_iso()
+                model_manifest["status"] = "completed"
+                model_manifest["finished_at_utc"] = _now_utc_iso()
+                model_manifest["updated_at_utc"] = _now_utc_iso()
+                _record_model_manifest(model_manifest, model_manifest_path)
+                continue
+
+            print(
+                f"[INFO] Running hybrid judge for model={model_name} "
+                f"with fixed judge={args.judge_model}"
+            )
+            try:
+                run_llm_judge(
+                    input_path=student_output_path,
+                    gold_path=args.benchmark_path,
+                    output_path=judge_output_path,
+                    model_name=args.judge_model,
+                    max_tokens=args.judge_max_tokens,
+                    temperature=args.judge_temperature,
+                    reasoning_effort=args.judge_reasoning_effort,
+                    judge_structured_retries=args.judge_structured_retries,
+                    judge_method=args.judge_method,
+                    judge_g_eval_fallback_structured=judge_g_eval_fallback_structured,
+                    judge_model_url=args.judge_model_url,
+                    judge_api_key=args.judge_api_key or args.api_key,
+                    trace_log_enabled=trace_log_enabled,
+                    trace_log_dir=trace_log_dir,
+                    resume_existing=resume_existing,
+                )
+            except Exception as exc:
+                model_manifest["status"] = "failed"
+                model_manifest["updated_at_utc"] = _now_utc_iso()
+                model_manifest["finished_at_utc"] = _now_utc_iso()
+                model_manifest["stages"]["judge"]["status"] = "failed"
+                model_manifest["stages"]["judge"]["finished_at_utc"] = _now_utc_iso()
+                model_manifest["error"] = str(exc)[:500]
+                _record_model_manifest(model_manifest, model_manifest_path)
+                _raise_model_limit_exit(
+                    "[ERROR] Model limit exceeded during judge stage; run aborted. "
+                    f"student_model={model_name}; judge_model={args.judge_model}",
+                    exc,
+                )
+                raise
+
+            model_manifest["stages"]["judge"]["status"] = "completed"
             model_manifest["stages"]["judge"]["finished_at_utc"] = _now_utc_iso()
-            model_manifest["stages"]["metrics"]["status"] = "completed"
+            model_manifest["stages"]["metrics"]["status"] = "running"
             model_manifest["stages"]["metrics"]["started_at_utc"] = _now_utc_iso()
+            model_manifest["updated_at_utc"] = _now_utc_iso()
+            _record_model_manifest(model_manifest, model_manifest_path)
+
+            judge_rows = read_jsonl(judge_output_path)
+            model_manifest["judge_rows"] = len(judge_rows)
+            metrics = compute_metrics(judge_rows)
+            metrics.update(
+                {
+                    "model_name": model_name,
+                    "judge_model": args.judge_model,
+                    "student_output_path": str(student_output_path),
+                    "judge_output_path": str(judge_output_path),
+                }
+            )
+
+            top_infra = sorted(
+                (metrics.get("infra_error_count") or {}).items(),
+                key=lambda kv: kv[1],
+                reverse=True,
+            )[:3]
+            if top_infra:
+                print(f"[INFO] Top infra errors for model={model_name}: {top_infra}")
+
+            write_json(metrics_path, metrics)
+            write_json(breakdown_path, metrics.get("breakdown_by_answer_type") or {})
+            write_json(
+                errors_sample_path,
+                (metrics.get("errors_sample") or [])[: max(args.error_sample_size, 0)],
+            )
+            model_manifest["stages"]["metrics"]["status"] = "completed"
             model_manifest["stages"]["metrics"]["finished_at_utc"] = _now_utc_iso()
             model_manifest["status"] = "completed"
             model_manifest["finished_at_utc"] = _now_utc_iso()
             model_manifest["updated_at_utc"] = _now_utc_iso()
-            write_json(model_manifest_path, model_manifest)
-            continue
+            model_manifest["quality_normalized_score"] = metrics.get("quality_normalized_score")
+            model_manifest["reliability_ok_rate"] = metrics.get("reliability_ok_rate")
+            _record_model_manifest(model_manifest, model_manifest_path)
 
-        print(
-            f"[INFO] Running hybrid judge for model={model_name} "
-            f"with fixed judge={args.judge_model}"
-        )
-        try:
-            run_llm_judge(
-                input_path=student_output_path,
-                gold_path=args.benchmark_path,
-                output_path=judge_output_path,
-                model_name=args.judge_model,
-                max_tokens=args.judge_max_tokens,
-                temperature=args.judge_temperature,
-                reasoning_effort=args.judge_reasoning_effort,
-                judge_structured_retries=args.judge_structured_retries,
-                judge_method=args.judge_method,
-                judge_g_eval_fallback_structured=judge_g_eval_fallback_structured,
-                judge_model_url=args.judge_model_url,
-                judge_api_key=args.judge_api_key or args.api_key,
-                trace_log_enabled=trace_log_enabled,
-                trace_log_dir=trace_log_dir,
-                resume_existing=resume_existing,
+            summary_rows.append(
+                _build_summary_row(
+                    model_name=model_name,
+                    metrics=metrics,
+                    judge_model=args.judge_model,
+                    metrics_path=metrics_path,
+                )
             )
-        except Exception as exc:
-            model_manifest["status"] = "failed"
-            model_manifest["updated_at_utc"] = _now_utc_iso()
-            model_manifest["finished_at_utc"] = _now_utc_iso()
-            model_manifest["stages"]["judge"]["status"] = "failed"
-            model_manifest["stages"]["judge"]["finished_at_utc"] = _now_utc_iso()
-            model_manifest["error"] = str(exc)[:500]
-            write_json(model_manifest_path, model_manifest)
-            _raise_model_limit_exit(
-                "[ERROR] Model limit exceeded during judge stage; run aborted. "
-                f"student_model={model_name}; judge_model={args.judge_model}",
-                exc,
-            )
-            raise
-        model_manifest["stages"]["judge"]["status"] = "completed"
-        model_manifest["stages"]["judge"]["finished_at_utc"] = _now_utc_iso()
-        model_manifest["stages"]["metrics"]["status"] = "running"
-        model_manifest["stages"]["metrics"]["started_at_utc"] = _now_utc_iso()
-        model_manifest["updated_at_utc"] = _now_utc_iso()
-        write_json(model_manifest_path, model_manifest)
-
-        judge_rows = read_jsonl(judge_output_path)
-        model_manifest["judge_rows"] = len(judge_rows)
-        metrics = compute_metrics(judge_rows)
-        metrics.update(
-            {
-                "model_name": model_name,
-                "judge_model": args.judge_model,
-                "student_output_path": str(student_output_path),
-                "judge_output_path": str(judge_output_path),
-            }
-        )
-
-        top_infra = sorted(
-            (metrics.get("infra_error_count") or {}).items(),
-            key=lambda kv: kv[1],
-            reverse=True,
-        )[:3]
-        if top_infra:
-            print(f"[INFO] Top infra errors for model={model_name}: {top_infra}")
-
-        write_json(metrics_path, metrics)
-        write_json(breakdown_path, metrics.get("breakdown_by_answer_type") or {})
-        write_json(
-            errors_sample_path,
-            (metrics.get("errors_sample") or [])[: max(args.error_sample_size, 0)],
-        )
-        model_manifest["stages"]["metrics"]["status"] = "completed"
-        model_manifest["stages"]["metrics"]["finished_at_utc"] = _now_utc_iso()
-        model_manifest["status"] = "completed"
-        model_manifest["finished_at_utc"] = _now_utc_iso()
-        model_manifest["updated_at_utc"] = _now_utc_iso()
-        model_manifest["quality_normalized_score"] = metrics.get("quality_normalized_score")
-        model_manifest["reliability_ok_rate"] = metrics.get("reliability_ok_rate")
-        write_json(model_manifest_path, model_manifest)
-
-        summary_rows.append(
-            _build_summary_row(
-                model_name=model_name,
-                metrics=metrics,
-                judge_model=args.judge_model,
-                metrics_path=metrics_path,
-            )
-        )
-        run_manifest["models"].append(
-            {
-                "model_name": model_name,
-                "model_slug": model_slug,
-                "status": model_manifest.get("status"),
-                "student_rows": model_manifest.get("student_rows"),
-                "judge_rows": model_manifest.get("judge_rows"),
-                "quality_normalized_score": model_manifest.get("quality_normalized_score"),
-                "reliability_ok_rate": model_manifest.get("reliability_ok_rate"),
-                "model_manifest_path": str(model_manifest_path),
-            }
-        )
+    except Exception:
+        run_manifest["status"] = "failed"
+        run_manifest["finished_at_utc"] = _now_utc_iso()
         run_manifest["updated_at_utc"] = _now_utc_iso()
         write_json(run_manifest_path, run_manifest)
+        raise
 
     summary_json_path = run_dir / "summary.json"
     summary_csv_path = run_dir / "summary.csv"
