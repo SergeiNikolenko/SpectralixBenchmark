@@ -237,16 +237,15 @@ def deterministic_score(answer_type: str, student_answer: Any, canonical_answer:
 def build_user_prompt(item: Dict[str, Any]) -> str:
     return f"""
 <task>
-Grade the student answer against the canonical answer for a chemistry exam question.
+Grade the chemistry answer against the canonical answer.
 </task>
 
 <scoring_rules>
 - Score in the range [0.0, 1.0].
-- Use 1.0 only when the student answer is fully correct for the requested answer_type.
-- Use 0.0 when the answer is incorrect, incompatible with the question, or effectively missing.
-- Use intermediate scores only for meaningful partial correctness.
+- Use 1.0 only when the student answer is fully correct for the requested contract.
 - Penalize chemistry mistakes more than wording differences.
 - Prefer semantic correctness over style.
+- Keep llm_comment to one short factual sentence.
 </scoring_rules>
 
 <output_contract>
@@ -255,8 +254,11 @@ Keep the comment concise, factual, and evidence-based.
 </output_contract>
 
 <question_context>
+Level: {item.get("level")}
 Question type: {item.get("question_type")}
 Answer type: {item.get("answer_type")}
+Task subtype: {item.get("task_subtype")}
+Difficulty: {item.get("difficulty")}
 </question_context>
 
 <question>
@@ -274,13 +276,17 @@ Answer type: {item.get("answer_type")}
 
 
 def build_g_eval_prompt(item: Dict[str, Any]) -> str:
-    spec = get_g_eval_spec(item.get("answer_type"))
+    spec = get_g_eval_spec(
+        item.get("answer_type"),
+        level=item.get("level"),
+        task_subtype=item.get("task_subtype"),
+    )
     criteria = "\n".join(f"- {entry}" for entry in spec["criteria"])
     evaluation_steps = "\n".join(f"{idx}. {entry}" for idx, entry in enumerate(spec["evaluation_steps"], start=1))
     rubric = "\n".join(f"- {entry}" for entry in spec["rubric"])
     return f"""
 <task>
-Evaluate the student answer using rubric-guided chemistry grading.
+Evaluate the chemistry answer using the rubric below.
 </task>
 
 <criteria>
@@ -297,12 +303,16 @@ Evaluate the student answer using rubric-guided chemistry grading.
 
 <output_contract>
 Return strict structured output only.
+Keep llm_comment to one or two short factual sentences, not just a score.
 Provide concrete step findings and one final rubric score from 0 to 10.
 </output_contract>
 
 <question_context>
+Level: {item.get("level")}
 Question type: {item.get("question_type")}
 Answer type: {item.get("answer_type")}
+Task subtype: {item.get("task_subtype")}
+Difficulty: {item.get("difficulty")}
 </question_context>
 
 <question>
@@ -640,6 +650,9 @@ def run_llm_judge(
                 max_score = _parse_max_score(gold_q)
                 judge_input = {
                     **student,
+                    "level": gold_q.get("level", student.get("level")),
+                    "task_subtype": gold_q.get("task_subtype", student.get("task_subtype")),
+                    "difficulty": gold_q.get("difficulty", student.get("difficulty")),
                     "canonical_answer": gold_q.get("canonical_answer"),
                 }
 
@@ -795,14 +808,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--judge-model",
         type=str,
-        default="gpt-5.2-codex",
-        help="Judge model name for non-deterministic answer types (default: gpt-5.2-codex)",
+        default="gpt-5.4-mini",
+        help="Judge model name for non-deterministic answer types (default: gpt-5.4-mini)",
     )
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=300,
-        help="Maximum completion tokens for LLM judge (default: 300)",
+        default=220,
+        help="Maximum completion tokens for LLM judge (default: 220)",
     )
     parser.add_argument(
         "--temperature",
@@ -813,9 +826,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reasoning-effort",
         type=str,
-        default="high",
+        default="medium",
         choices=["low", "medium", "high"],
-        help="Reasoning effort for judge model calls (default: high)",
+        help="Reasoning effort for judge model calls (default: medium)",
     )
     parser.add_argument(
         "--judge-structured-retries",

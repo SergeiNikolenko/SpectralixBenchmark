@@ -12,6 +12,9 @@ EXPECTED_STUDENT_OUTPUT_KEYS = {
     "exam_id",
     "page_id",
     "question_id",
+    "level",
+    "task_subtype",
+    "difficulty",
     "question_type",
     "question_text",
     "answer_type",
@@ -19,6 +22,10 @@ EXPECTED_STUDENT_OUTPUT_KEYS = {
     "student_status",
     "student_error",
     "student_elapsed_ms",
+    "student_input_tokens",
+    "student_output_tokens",
+    "student_total_tokens",
+    "student_reasoning_tokens",
 }
 EXPECTED_TRACE_SECTIONS = (
     "=== REASONING SUMMARY ===",
@@ -56,6 +63,9 @@ class _FakeAgentRuntime:
     def get_last_run_details(self):
         return {"state": "success", "steps": []}
 
+    def get_runtime_metadata(self):
+        return {"executor_type": "local", "sandbox_runtime": "local_worker"}
+
 
 class _QuotaAgentRuntime:
     def __init__(self, *args, **kwargs):
@@ -77,6 +87,9 @@ class _QuotaAgentRuntime:
 
     def get_last_run_details(self):
         return {"state": "error", "steps": []}
+
+    def get_runtime_metadata(self):
+        return {"executor_type": "local", "sandbox_runtime": "local_worker"}
 
 
 def _write_benchmark(path: Path) -> None:
@@ -211,6 +224,9 @@ class RunFullMatrixContractTests(unittest.TestCase):
                         "exam_id": "exam_1",
                         "page_id": "1",
                         "question_id": "1",
+                        "level": None,
+                        "task_subtype": None,
+                        "difficulty": None,
                         "question_type": "text",
                         "question_text": "Q1",
                         "answer_type": "single_choice",
@@ -218,11 +234,18 @@ class RunFullMatrixContractTests(unittest.TestCase):
                         "student_status": "ok",
                         "student_error": "",
                         "student_elapsed_ms": 10,
+                        "student_input_tokens": 0,
+                        "student_output_tokens": 0,
+                        "student_total_tokens": 0,
+                        "student_reasoning_tokens": 0,
                     },
                     {
                         "exam_id": "exam_1",
                         "page_id": "1",
                         "question_id": "2",
+                        "level": None,
+                        "task_subtype": None,
+                        "difficulty": None,
                         "question_type": "text",
                         "question_text": "Q2",
                         "answer_type": "ordering",
@@ -230,6 +253,10 @@ class RunFullMatrixContractTests(unittest.TestCase):
                         "student_status": "ok",
                         "student_error": "",
                         "student_elapsed_ms": 12,
+                        "student_input_tokens": 0,
+                        "student_output_tokens": 0,
+                        "student_total_tokens": 0,
+                        "student_reasoning_tokens": 0,
                     },
                 ]
                 with output_path.open("w", encoding="utf-8") as f:

@@ -9,11 +9,11 @@
 ## Runtime Mode
 
 - Uses `scripts/agents/runtime.py`
-- Executes tool-capable agent with Docker sandbox
+- Executes tool-capable agent with OpenShell sandbox
 - Controlled by `scripts/agents/agent_config.yaml`
-- Uses `scripts/pydantic_guard/*` for structured validation/repair on top of `smolagents`
-- Docker preflight runs once before row loop (fail-fast on sandbox issues)
-- Agent runtime is reset between benchmark rows to reduce state leakage across questions
+- Uses `scripts/pydantic_guard/*` for structured validation/repair above the runtime
+- OpenShell preflight runs once before row loop (fail-fast on gateway/sandbox issues)
+- Agent runtime reuses a named OpenShell sandbox and configures gateway-scoped managed inference before row execution
 - Student prompt hides `exam_id/page_id/question_id`; only `question_text` + `answer_type` are passed to the model
 
 ## Dependencies
@@ -56,28 +56,29 @@ Required:
 Agent flags:
 
 - `--agent-max-steps` (default: `6`)
-- `--agent-sandbox` (default: `docker`)
-- `--agent-tools-profile` (default: `full`)
+- `--agent-sandbox` (default: `openshell`)
+- `--agent-tools-profile` (default: `minimal`)
 - `--agent-config` (default: `scripts/agents/agent_config.yaml`)
 
 Tools profiles:
 
-- `full`: all allowlisted runtime tools
-- `minimal`: reduced helper set
+- `no_tools`: no local helper tools
+- `minimal`: no helper tools, pure model path
+- `tools`: local chemistry helpers without internet
+- `tools_internet`: local chemistry helpers plus allowlisted HTTP fetch
 
 Chemistry tool note:
 
-- `full` now includes `chem_python_tool`, which runs short snippets via `uv run python`
-- if `rdkit` is installed in the project environment, the tool can use `from rdkit import Chem`
+- `tools` and `tools_internet` include `chem_python_tool`, which runs short snippets inside the sandbox
+- runtime bootstrap installs required packages into `/sandbox/.venv` on first use
 - prefer this tool for SMILES validation, canonicalization, formula checks, and small chemistry calculations
 
 Leakage protection defaults:
 
 - Benchmark path is not passed to student agent tasks
-- Docker sandbox does not mount repository workspace by default (`mount_workspace_readonly: false`)
+- OpenShell policy restricts filesystem access to sandbox paths
+- Student traffic inside the sandbox goes to `https://inference.local/v1`; upstream API credentials stay on the host-side OpenShell provider
 - `--agent-sandbox local` is unsafe for benchmark integrity and should be used only for debugging
-
-Base smolagents tools are enabled by default via `runtime.add_base_tools: true`.
 
 Student guard flags:
 
@@ -163,7 +164,7 @@ It uses rubric-guided structured judging and can fall back to the standard struc
 uv run python -m scripts.evaluation.llm_judge \
   --input-path scripts/evaluation/student_output.jsonl \
   --gold-path benchmark/benchmark_v1_0.jsonl \
-  --judge-model "gpt-5.3-codex-spark" \
+  --judge-model "gpt-5.4-mini" \
   --reasoning-effort high \
   --judge-model-url "http://127.0.0.1:8317/v1" \
   --judge-api-key "ccs-internal-managed" \
@@ -184,7 +185,9 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --api-base-url "http://127.0.0.1:8317/v1" \
   --api-key "ccs-internal-managed" \
   --models gpt-5.3-codex-spark \
-  --judge-model gpt-5.3-codex-spark \
+  --judge-model gpt-5.4-mini \
+  --agent-sandbox openshell \
+  --agent-tools-profile minimal \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
@@ -225,14 +228,15 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --judge-method g_eval \
   --judge-g-eval-fallback-structured true \
   --judge-reasoning-effort medium \
-  --agent-sandbox local \
+  --agent-sandbox openshell \
+  --agent-tools-profile minimal \
   --trace-log-enabled true
 ```
 
 Notes:
 
-- `--agent-sandbox docker` remains the default and is preferred for integrity.
-- `--agent-sandbox local` is the practical fallback when Docker is unavailable.
+- `--agent-sandbox openshell` is the default and preferred runtime.
+- `--agent-sandbox local` is the practical fallback when OpenShell is unavailable.
 - Current `/v1/models` availability should be checked before long runs. In this environment
   the local `ccs` endpoint exposes `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`,
   `gpt-5.2-codex`, `gpt-5-codex-mini`, and related `gpt-5.x` variants.
@@ -246,6 +250,9 @@ Student output (`student_output.jsonl`) schema is stable:
 - `exam_id`
 - `page_id`
 - `question_id`
+- `level`
+- `task_subtype`
+- `difficulty`
 - `question_type`
 - `question_text`
 - `answer_type`
@@ -253,5 +260,9 @@ Student output (`student_output.jsonl`) schema is stable:
 - `student_status`
 - `student_error`
 - `student_elapsed_ms`
+- `student_input_tokens`
+- `student_output_tokens`
+- `student_total_tokens`
+- `student_reasoning_tokens`
 
 Judge output (`llm_judge_output.jsonl`) schema remains unchanged.

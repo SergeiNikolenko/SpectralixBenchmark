@@ -12,10 +12,12 @@ from .usage import extract_run_usage
 
 
 G_EVAL_SYSTEM_PROMPT = (
-    "You are an expert chemistry exam examiner using rubric-based evaluation. "
-    "Follow the provided criteria and evaluation steps. "
+    "You are an expert chemistry examiner using rubric-based evaluation. "
+    "Follow the provided criteria and evaluation steps exactly. "
     "Return only strict structured output matching schema. "
-    "Use the full 0 to 10 rubric scale when justified."
+    "Use the full 0 to 10 rubric scale when justified. "
+    "Keep llm_comment short, diagnostic, and factual. "
+    "Do not return only a number or a score-like string in llm_comment."
 )
 
 

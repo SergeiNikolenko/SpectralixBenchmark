@@ -1,19 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 import json
 import subprocess
 import re
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 import os
-
-try:
-    from smolagents import tool
-except Exception:  # pragma: no cover - graceful import fallback
-    def tool(func):  # type: ignore
-        return func
 
 
 def _normalize_answer_type(answer_type: str) -> str:
@@ -46,7 +41,6 @@ def _normalize_sequence(text: str) -> str:
     return "; ".join(tokens)
 
 
-@tool
 def chem_format_tool(answer_type: str, raw_text: str) -> str:
     """
     Normalizes raw model output into benchmark-friendly format by answer_type.
@@ -79,7 +73,6 @@ def chem_format_tool(answer_type: str, raw_text: str) -> str:
     return re.sub(r"\s+", " ", payload).strip()
 
 
-@tool
 def smiles_sanity_tool(smiles: str) -> str:
     """
     Performs lightweight sanity checks for a SMILES candidate string.
@@ -104,7 +97,6 @@ def smiles_sanity_tool(smiles: str) -> str:
     return json.dumps({"valid": True, "normalized": candidate})
 
 
-@tool
 def unit_convert_tool(value: float, from_unit: str, to_unit: str) -> str:
     """
     Converts between selected chemistry units.
@@ -162,7 +154,6 @@ def unit_convert_tool(value: float, from_unit: str, to_unit: str) -> str:
     )
 
 
-@tool
 def rubric_hint_tool(answer_type: str) -> str:
     """
     Returns concise benchmark scoring hints by answer type.
@@ -186,7 +177,6 @@ def rubric_hint_tool(answer_type: str) -> str:
     return hints.get(a, "Produce a precise, machine-readable answer with minimal extra text.")
 
 
-@tool
 def json_array_validate_tool(raw_json: str) -> str:
     """
     Validates that input is a JSON array and returns normalized compact JSON.
@@ -215,7 +205,6 @@ def json_array_validate_tool(raw_json: str) -> str:
     return json.dumps({"valid": True, "normalized": json.dumps(parsed, ensure_ascii=False)})
 
 
-@tool
 def chem_python_tool(code: str, timeout_sec: int = 20) -> str:
     """
     Runs a short Python snippet inside the project uv environment.
@@ -229,14 +218,12 @@ def chem_python_tool(code: str, timeout_sec: int = 20) -> str:
     if not snippet:
         return json.dumps({"status": "error", "reason": "empty_code"})
 
-    workspace_dir = Path(__file__).resolve().parents[2]
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
 
     try:
         proc = subprocess.run(
-            ["uv", "run", "python", "-c", snippet],
-            cwd=str(workspace_dir),
+            [os.environ.get("PYTHON_BIN", "python"), "-c", snippet],
             env=env,
             capture_output=True,
             text=True,
@@ -261,7 +248,6 @@ def chem_python_tool(code: str, timeout_sec: int = 20) -> str:
     )
 
 
-@tool
 def safe_http_get_tool(url: str, timeout_sec: int = 10) -> str:
     """
     Fetches a trusted URL only if host is allowlisted in AGENT_ALLOWED_HOSTS.
@@ -301,15 +287,116 @@ def safe_http_get_tool(url: str, timeout_sec: int = 10) -> str:
         return json.dumps({"status": "error", "reason": f"http_error:{exc}"})
 
 
-TOOL_REGISTRY = {
-    "chem_format_tool": chem_format_tool,
-    "smiles_sanity_tool": smiles_sanity_tool,
-    "unit_convert_tool": unit_convert_tool,
-    "rubric_hint_tool": rubric_hint_tool,
-    "json_array_validate_tool": json_array_validate_tool,
-    "chem_python_tool": chem_python_tool,
-    "safe_http_get_tool": safe_http_get_tool,
+@dataclass(frozen=True)
+class ToolDefinition:
+    name: str
+    func: Callable[..., str]
+    description: str
+    schema: Dict[str, Any]
+    is_network_tool: bool = False
+
+
+def _object_schema(
+    *,
+    properties: Dict[str, Dict[str, Any]],
+    required: List[str],
+) -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+TOOL_DEFINITIONS: Dict[str, ToolDefinition] = {
+    "chem_format_tool": ToolDefinition(
+        name="chem_format_tool",
+        func=chem_format_tool,
+        description="Normalize a raw chemistry answer into benchmark-friendly machine-readable format.",
+        schema=_object_schema(
+            properties={
+                "answer_type": {"type": "string"},
+                "raw_text": {"type": "string"},
+            },
+            required=["answer_type", "raw_text"],
+        ),
+    ),
+    "smiles_sanity_tool": ToolDefinition(
+        name="smiles_sanity_tool",
+        func=smiles_sanity_tool,
+        description="Perform lightweight syntax checks on a candidate SMILES string.",
+        schema=_object_schema(
+            properties={
+                "smiles": {"type": "string"},
+            },
+            required=["smiles"],
+        ),
+    ),
+    "unit_convert_tool": ToolDefinition(
+        name="unit_convert_tool",
+        func=unit_convert_tool,
+        description="Convert common chemistry units for mass, volume, and amount.",
+        schema=_object_schema(
+            properties={
+                "value": {"type": "number"},
+                "from_unit": {"type": "string"},
+                "to_unit": {"type": "string"},
+            },
+            required=["value", "from_unit", "to_unit"],
+        ),
+    ),
+    "rubric_hint_tool": ToolDefinition(
+        name="rubric_hint_tool",
+        func=rubric_hint_tool,
+        description="Return a short answer-format hint for a benchmark answer type.",
+        schema=_object_schema(
+            properties={
+                "answer_type": {"type": "string"},
+            },
+            required=["answer_type"],
+        ),
+    ),
+    "json_array_validate_tool": ToolDefinition(
+        name="json_array_validate_tool",
+        func=json_array_validate_tool,
+        description="Validate that a string contains a JSON array and return a compact normalized version.",
+        schema=_object_schema(
+            properties={
+                "raw_json": {"type": "string"},
+            },
+            required=["raw_json"],
+        ),
+    ),
+    "chem_python_tool": ToolDefinition(
+        name="chem_python_tool",
+        func=chem_python_tool,
+        description="Run a short Python chemistry validation snippet and capture stdout and stderr.",
+        schema=_object_schema(
+            properties={
+                "code": {"type": "string"},
+                "timeout_sec": {"type": "integer", "minimum": 1},
+            },
+            required=["code"],
+        ),
+    ),
+    "safe_http_get_tool": ToolDefinition(
+        name="safe_http_get_tool",
+        func=safe_http_get_tool,
+        description="Fetch a trusted HTTP(S) URL when the hostname is allowlisted.",
+        schema=_object_schema(
+            properties={
+                "url": {"type": "string"},
+                "timeout_sec": {"type": "integer", "minimum": 1},
+            },
+            required=["url"],
+        ),
+        is_network_tool=True,
+    ),
 }
+
+
+TOOL_REGISTRY = {name: item.func for name, item in TOOL_DEFINITIONS.items()}
 
 
 def build_tools(profile: str, config: Dict[str, Any]) -> List[Any]:
@@ -324,14 +411,36 @@ def build_tools(profile: str, config: Dict[str, Any]) -> List[Any]:
     tools: List[Any] = []
 
     for name in selected:
-        tool_obj = TOOL_REGISTRY.get(name)
-        if tool_obj is None:
+        tool_definition = TOOL_DEFINITIONS.get(name)
+        if tool_definition is None:
             raise ValueError(f"Unknown tool in profile '{profile}': {name}")
 
-        if name == "safe_http_get_tool" and (not has_allowed_hosts or not allow_network_tools):
+        if tool_definition.is_network_tool and (not has_allowed_hosts or not allow_network_tools):
             # Keep tool disabled when allowlist is empty.
             continue
 
-        tools.append(tool_obj)
+        tools.append(tool_definition.func)
 
     return tools
+
+
+def build_tool_definitions(profile: str, config: Dict[str, Any]) -> List[ToolDefinition]:
+    profiles = ((config.get("tools") or {}).get("profiles") or {})
+    if profile not in profiles:
+        known_profiles = ", ".join(sorted(profiles.keys()))
+        raise ValueError(f"Unknown tools profile '{profile}'. Known profiles: {known_profiles}")
+
+    selected = profiles[profile]
+    security = config.get("security") or {}
+    has_allowed_hosts = bool(security.get("allowed_tool_hosts"))
+    allow_network_tools = bool(security.get("allow_network_tools", False))
+
+    tool_definitions: List[ToolDefinition] = []
+    for name in selected:
+        tool_definition = TOOL_DEFINITIONS.get(name)
+        if tool_definition is None:
+            raise ValueError(f"Unknown tool in profile '{profile}': {name}")
+        if tool_definition.is_network_tool and (not has_allowed_hosts or not allow_network_tools):
+            continue
+        tool_definitions.append(tool_definition)
+    return tool_definitions

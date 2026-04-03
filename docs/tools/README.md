@@ -89,10 +89,11 @@ wc -l benchmark/level_a_eval.jsonl benchmark/level_b_eval.jsonl benchmark/level_
 
 ## Security and Runtime
 
-Before docker-bound production-style runs:
+Before OpenShell-backed production-style runs:
 
 ```bash
 docker info >/dev/null
+openshell gateway start --name spectralix --port 18080 --plaintext --recreate
 ```
 
 For security policy details:

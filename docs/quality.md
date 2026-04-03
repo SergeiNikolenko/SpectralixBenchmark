@@ -24,7 +24,7 @@ Strengths:
 
 Gaps:
 
-- local vs docker behavior differences are not fully benchmarked across all paths
+- local vs OpenShell behavior differences are not fully benchmarked across all paths
 - tools vs tools+internet observability still needs stronger explicit per-row instrumentation
 
 ## B. Benchmark Ladder Documentation - Grade B+

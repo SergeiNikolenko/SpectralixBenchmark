@@ -3,6 +3,7 @@ import csv
 import json
 import re
 import subprocess
+import math
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,21 @@ MODEL_LIMIT_ERROR_MARKERS = (
     "monthly usage limit",
     "model limit exceeded",
 )
+
+TOKEN_TRACE_PATTERN = re.compile(r"Input tokens: ([0-9,]+) \| Output tokens: ([0-9,]+)")
+DEFAULT_PRICING_USD_PER_1M: Dict[str, Dict[str, float]] = {
+    "gpt-5.4": {"input": 2.50, "output": 15.00},
+    "gpt-5.4-mini": {"input": 0.250, "output": 2.000},
+    "gpt-5": {"input": 1.250, "output": 10.000},
+    "gpt-5-codex": {"input": 1.250, "output": 10.000},
+    "gpt-5-codex-mini": {"input": 0.250, "output": 2.000},
+    "gpt-5.1": {"input": 1.250, "output": 10.000},
+    "gpt-5.1-codex": {"input": 1.250, "output": 10.000},
+    "gpt-5.1-codex-mini": {"input": 0.250, "output": 2.000},
+    "gpt-5.1-codex-max": {"input": 1.250, "output": 10.000},
+    "gpt-5.2": {"input": 1.750, "output": 14.000},
+    "gpt-5.2-codex": {"input": 1.750, "output": 14.000},
+}
 
 
 def _now_utc_iso() -> str:
@@ -63,6 +79,12 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
                 continue
             rows.append(json.loads(line))
     return rows
+
+
+def _read_json(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -106,6 +128,88 @@ def _resolve_model_url(model_url: Optional[str], api_base_url: Optional[str]) ->
     return ensure_chat_completions_url(raw_value)
 
 
+def _safe_float(value: Optional[float]) -> Optional[float]:
+    if value is None:
+        return None
+    if math.isnan(value) or math.isinf(value):
+        return None
+    return float(value)
+
+
+def _resolve_pricing(
+    *,
+    model_name: str,
+    input_price_override: Optional[float],
+    output_price_override: Optional[float],
+) -> Dict[str, Optional[float]]:
+    default = DEFAULT_PRICING_USD_PER_1M.get(model_name, {})
+    return {
+        "input_per_1m_usd": _safe_float(
+            input_price_override if input_price_override is not None else default.get("input")
+        ),
+        "output_per_1m_usd": _safe_float(
+            output_price_override if output_price_override is not None else default.get("output")
+        ),
+    }
+
+
+def _estimate_cost_usd(
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    input_per_1m_usd: Optional[float],
+    output_per_1m_usd: Optional[float],
+) -> Optional[float]:
+    if input_per_1m_usd is None or output_per_1m_usd is None:
+        return None
+    return (
+        (float(input_tokens) / 1_000_000.0) * input_per_1m_usd
+        + (float(output_tokens) / 1_000_000.0) * output_per_1m_usd
+    )
+
+
+def _collect_student_token_totals(trace_log_dir: Path) -> Dict[str, int]:
+    totals = {
+        "student_input_tokens_total": 0,
+        "student_output_tokens_total": 0,
+        "student_total_tokens_total": 0,
+    }
+    if not trace_log_dir.exists():
+        return totals
+
+    for trace_path in trace_log_dir.glob("*.log"):
+        text = trace_path.read_text(encoding="utf-8", errors="ignore")
+        for match in TOKEN_TRACE_PATTERN.finditer(text):
+            input_tokens = int(match.group(1).replace(",", ""))
+            output_tokens = int(match.group(2).replace(",", ""))
+            totals["student_input_tokens_total"] += input_tokens
+            totals["student_output_tokens_total"] += output_tokens
+
+    totals["student_total_tokens_total"] = (
+        totals["student_input_tokens_total"] + totals["student_output_tokens_total"]
+    )
+    return totals
+
+
+def _collect_student_token_totals_from_rows(student_rows: List[Dict[str, Any]]) -> Dict[str, int]:
+    input_total = int(sum(int(row.get("student_input_tokens") or 0) for row in student_rows))
+    output_total = int(sum(int(row.get("student_output_tokens") or 0) for row in student_rows))
+    total_total = int(sum(int(row.get("student_total_tokens") or 0) for row in student_rows))
+    if total_total == 0:
+        total_total = input_total + output_total
+    return {
+        "student_input_tokens_total": input_total,
+        "student_output_tokens_total": output_total,
+        "student_total_tokens_total": total_total,
+    }
+
+
+def _format_usd(value: Optional[float]) -> str:
+    if value is None:
+        return "n/a"
+    return f"${value:.4f}"
+
+
 def _build_skipped_row(model_name: str) -> Dict[str, Any]:
     return {
         "model_name": model_name,
@@ -117,8 +221,65 @@ def _build_skipped_row(model_name: str) -> Dict[str, Any]:
         "reliability_ok_rate": None,
         "infra_error_count": {},
         "infra_error_rate": {},
+        "student_input_tokens_total": None,
+        "student_output_tokens_total": None,
+        "student_total_tokens_total": None,
+        "judge_input_tokens_total": None,
+        "judge_output_tokens_total": None,
+        "judge_total_tokens_total": None,
+        "judge_reasoning_tokens_total": None,
+        "judge_requests_total": None,
+        "judge_tool_calls_total": None,
+        "student_estimated_cost_usd": None,
+        "judge_estimated_cost_usd": None,
+        "estimated_cost_usd": None,
         "skipped": True,
     }
+
+
+def _validate_resume_compatibility(
+    *,
+    existing_manifest: Optional[Dict[str, Any]],
+    benchmark_path: Path,
+    model_name: str,
+    judge_model: str,
+    agent_sandbox: str,
+    agent_tools_profile: str,
+    agent_config: Path,
+) -> None:
+    if not existing_manifest:
+        return
+    expected_pairs = {
+        "benchmark_path": str(benchmark_path),
+        "model_name": model_name,
+    }
+    settings = existing_manifest.get("settings") if isinstance(existing_manifest.get("settings"), dict) else {}
+    actual_pairs = {
+        "benchmark_path": str(existing_manifest.get("benchmark_path") or ""),
+        "model_name": str(existing_manifest.get("model_name") or ""),
+        "judge_model": str(settings.get("judge_model") or ""),
+        "agent_sandbox": str(settings.get("agent_sandbox") or ""),
+        "agent_tools_profile": str(settings.get("agent_tools_profile") or ""),
+        "agent_config": str(settings.get("agent_config") or ""),
+    }
+    expected_pairs.update(
+        {
+            "judge_model": judge_model,
+            "agent_sandbox": agent_sandbox,
+            "agent_tools_profile": agent_tools_profile,
+            "agent_config": str(agent_config),
+        }
+    )
+    mismatches = {
+        key: {"existing": actual_pairs.get(key), "requested": expected_pairs.get(key)}
+        for key in expected_pairs
+        if actual_pairs.get(key) and actual_pairs.get(key) != expected_pairs.get(key)
+    }
+    if mismatches:
+        raise ValueError(
+            "Resume requested for an incompatible run directory. "
+            f"Use a fresh run_id or clear previous artifacts. mismatches={mismatches}"
+        )
 
 
 def _build_summary_row(
@@ -145,12 +306,18 @@ def _summary_base_fields(row: Dict[str, Any]) -> Dict[str, Any]:
         "quality_max_score": row.get("quality_max_score"),
         "quality_normalized_score": row.get("quality_normalized_score"),
         "quality_end_to_end_score": row.get("quality_end_to_end_score"),
+        "student_input_tokens_total": row.get("student_input_tokens_total"),
+        "student_output_tokens_total": row.get("student_output_tokens_total"),
+        "student_total_tokens_total": row.get("student_total_tokens_total"),
         "judge_input_tokens_total": row.get("judge_input_tokens_total"),
         "judge_output_tokens_total": row.get("judge_output_tokens_total"),
         "judge_total_tokens_total": row.get("judge_total_tokens_total"),
         "judge_reasoning_tokens_total": row.get("judge_reasoning_tokens_total"),
         "judge_requests_total": row.get("judge_requests_total"),
         "judge_tool_calls_total": row.get("judge_tool_calls_total"),
+        "student_estimated_cost_usd": row.get("student_estimated_cost_usd"),
+        "judge_estimated_cost_usd": row.get("judge_estimated_cost_usd"),
+        "estimated_cost_usd": row.get("estimated_cost_usd"),
         "reliability_ok_count": row.get("reliability_ok_count"),
         "reliability_ok_rate": row.get("reliability_ok_rate"),
     }
@@ -304,12 +471,18 @@ def write_summary_csv(path: Path, summary_rows: List[Dict[str, Any]]) -> None:
         "quality_max_score",
         "quality_normalized_score",
         "quality_end_to_end_score",
+        "student_input_tokens_total",
+        "student_output_tokens_total",
+        "student_total_tokens_total",
         "judge_input_tokens_total",
         "judge_output_tokens_total",
         "judge_total_tokens_total",
         "judge_reasoning_tokens_total",
         "judge_requests_total",
         "judge_tool_calls_total",
+        "student_estimated_cost_usd",
+        "judge_estimated_cost_usd",
+        "estimated_cost_usd",
         "reliability_ok_count",
         "reliability_ok_rate",
     ] + [f"infra_error_count.{key}" for key in infra_keys]
@@ -395,8 +568,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--judge-max-tokens",
         type=int,
-        default=300,
-        help="Judge completion max tokens (default: 300)",
+        default=220,
+        help="Judge completion max tokens (default: 220)",
     )
     parser.add_argument(
         "--judge-temperature",
@@ -407,9 +580,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--judge-reasoning-effort",
         type=str,
-        default="high",
+        default="medium",
         choices=["low", "medium", "high"],
-        help="Judge reasoning effort for LLM calls (default: high)",
+        help="Judge reasoning effort for LLM calls (default: medium)",
     )
     parser.add_argument(
         "--error-sample-size",
@@ -432,14 +605,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--agent-sandbox",
         type=str,
-        default="docker",
-        help="Agent executor type (default: docker)",
+        default="openshell",
+        help="Agent executor type (default: openshell)",
     )
     parser.add_argument(
         "--agent-tools-profile",
         type=str,
-        default="full",
-        help="Tools profile from agent config (default: full)",
+        default="minimal",
+        help="Tools profile from agent config (default: minimal)",
     )
     parser.add_argument(
         "--agent-config",
@@ -526,6 +699,30 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional API key override for judge stage",
+    )
+    parser.add_argument(
+        "--student-input-price-per-1m-usd",
+        type=float,
+        default=None,
+        help="Optional override for student input token price in USD per 1M tokens",
+    )
+    parser.add_argument(
+        "--student-output-price-per-1m-usd",
+        type=float,
+        default=None,
+        help="Optional override for student output token price in USD per 1M tokens",
+    )
+    parser.add_argument(
+        "--judge-input-price-per-1m-usd",
+        type=float,
+        default=None,
+        help="Optional override for judge input token price in USD per 1M tokens",
+    )
+    parser.add_argument(
+        "--judge-output-price-per-1m-usd",
+        type=float,
+        default=None,
+        help="Optional override for judge output token price in USD per 1M tokens",
     )
     return parser.parse_args()
 
@@ -637,6 +834,16 @@ def main() -> None:
                 else (model_dir / "student_output_verbose.jsonl")
             )
             model_manifest_path = model_dir / "run_manifest.json"
+            if resume_existing:
+                _validate_resume_compatibility(
+                    existing_manifest=_read_json(model_manifest_path),
+                    benchmark_path=args.benchmark_path,
+                    model_name=model_name,
+                    judge_model=args.judge_model,
+                    agent_sandbox=args.agent_sandbox,
+                    agent_tools_profile=args.agent_tools_profile,
+                    agent_config=args.agent_config,
+                )
             model_manifest: Dict[str, Any] = {
                 "run_id": args.run_id,
                 "model_name": model_name,
@@ -788,12 +995,49 @@ def main() -> None:
             judge_rows = read_jsonl(judge_output_path)
             model_manifest["judge_rows"] = len(judge_rows)
             metrics = compute_metrics(judge_rows)
+            student_token_totals = _collect_student_token_totals_from_rows(student_rows)
+            if (
+                student_token_totals["student_input_tokens_total"] == 0
+                and student_token_totals["student_output_tokens_total"] == 0
+            ):
+                student_token_totals = _collect_student_token_totals(trace_log_dir)
+            student_pricing = _resolve_pricing(
+                model_name=model_name,
+                input_price_override=args.student_input_price_per_1m_usd,
+                output_price_override=args.student_output_price_per_1m_usd,
+            )
+            judge_pricing = _resolve_pricing(
+                model_name=args.judge_model,
+                input_price_override=args.judge_input_price_per_1m_usd,
+                output_price_override=args.judge_output_price_per_1m_usd,
+            )
+            student_estimated_cost_usd = _estimate_cost_usd(
+                input_tokens=int(student_token_totals.get("student_input_tokens_total") or 0),
+                output_tokens=int(student_token_totals.get("student_output_tokens_total") or 0),
+                input_per_1m_usd=student_pricing["input_per_1m_usd"],
+                output_per_1m_usd=student_pricing["output_per_1m_usd"],
+            )
+            judge_estimated_cost_usd = _estimate_cost_usd(
+                input_tokens=int(metrics.get("judge_input_tokens_total") or 0),
+                output_tokens=int(metrics.get("judge_output_tokens_total") or 0),
+                input_per_1m_usd=judge_pricing["input_per_1m_usd"],
+                output_per_1m_usd=judge_pricing["output_per_1m_usd"],
+            )
+            estimated_cost_usd = None
+            if student_estimated_cost_usd is not None and judge_estimated_cost_usd is not None:
+                estimated_cost_usd = student_estimated_cost_usd + judge_estimated_cost_usd
             metrics.update(
                 {
                     "model_name": model_name,
                     "judge_model": args.judge_model,
                     "student_output_path": str(student_output_path),
                     "judge_output_path": str(judge_output_path),
+                    **student_token_totals,
+                    "student_pricing_usd_per_1m": student_pricing,
+                    "judge_pricing_usd_per_1m": judge_pricing,
+                    "student_estimated_cost_usd": student_estimated_cost_usd,
+                    "judge_estimated_cost_usd": judge_estimated_cost_usd,
+                    "estimated_cost_usd": estimated_cost_usd,
                 }
             )
 
@@ -804,6 +1048,12 @@ def main() -> None:
             )[:3]
             if top_infra:
                 print(f"[INFO] Top infra errors for model={model_name}: {top_infra}")
+            print(
+                "[INFO] Estimated run cost for "
+                f"model={model_name}: student={_format_usd(student_estimated_cost_usd)}, "
+                f"judge={_format_usd(judge_estimated_cost_usd)}, "
+                f"total={_format_usd(estimated_cost_usd)}"
+            )
 
             write_json(metrics_path, metrics)
             write_json(breakdown_path, metrics.get("breakdown_by_answer_type") or {})
@@ -818,6 +1068,15 @@ def main() -> None:
             model_manifest["updated_at_utc"] = _now_utc_iso()
             model_manifest["quality_normalized_score"] = metrics.get("quality_normalized_score")
             model_manifest["reliability_ok_rate"] = metrics.get("reliability_ok_rate")
+            model_manifest["student_input_tokens_total"] = metrics.get("student_input_tokens_total")
+            model_manifest["student_output_tokens_total"] = metrics.get("student_output_tokens_total")
+            model_manifest["student_total_tokens_total"] = metrics.get("student_total_tokens_total")
+            model_manifest["judge_input_tokens_total"] = metrics.get("judge_input_tokens_total")
+            model_manifest["judge_output_tokens_total"] = metrics.get("judge_output_tokens_total")
+            model_manifest["judge_total_tokens_total"] = metrics.get("judge_total_tokens_total")
+            model_manifest["student_estimated_cost_usd"] = metrics.get("student_estimated_cost_usd")
+            model_manifest["judge_estimated_cost_usd"] = metrics.get("judge_estimated_cost_usd")
+            model_manifest["estimated_cost_usd"] = metrics.get("estimated_cost_usd")
             _record_model_manifest(model_manifest, model_manifest_path)
 
             summary_rows.append(

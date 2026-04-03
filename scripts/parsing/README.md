@@ -9,7 +9,7 @@
 
 `exam-parser-pipeline.py` uses agent runtime by default:
 
-- Agent mode: `smolagents` + Docker sandbox
+- Agent mode: OpenShell-backed runtime
 - Structured repair mode: `PydanticAI` repairs malformed parser JSON when enabled
 - Fallback: legacy OpenAI direct call if agent runtime initialization fails
 

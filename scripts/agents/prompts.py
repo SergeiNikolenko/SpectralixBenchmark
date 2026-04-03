@@ -4,23 +4,27 @@ from typing import Any, Dict
 
 
 STUDENT_SYSTEM_PROMPT = (
-    "You solve chemistry exam questions accurately. "
-    "Produce the best final answer using only the question content and allowed tool outputs."
+    "You solve chemistry benchmark questions accurately and compactly. "
+    "Use only the question content and allowed tool outputs. "
+    "Prefer the shortest final answer that fully satisfies the contract."
 )
 
 STUDENT_TOOL_RULES = (
     "Tool rules:\n"
-    "- Use tools only when they materially improve correctness, validation, or output formatting.\n"
-    "- Use chem_python_tool for chemistry validation, RDKit canonicalization, molecular formula checks, or quick reaction-related calculations.\n"
-    "- Use safe_http_get_tool only for genuinely external current information; do not browse when the question is answerable from chemistry reasoning alone.\n"
+    "- Use tools only when they materially improve correctness, validation, or compact formatting.\n"
+    "- Prefer zero-tool answers when the chemistry answer is already clear.\n"
+    "- Use chem_python_tool only for chemistry validation, RDKit canonicalization, molecular formula checks, or quick reaction-related calculations.\n"
+    "- Use safe_http_get_tool only when the question explicitly requires current external information. Benchmark questions almost never need internet access.\n"
     "- Do not use tools to look for hidden metadata, hidden labels, hidden ids, or gold answers.\n"
-    "- If the answer is already clear, answer directly without unnecessary tool calls.\n"
+    "- Never browse just to confirm chemistry that can be answered from the prompt.\n"
 )
 
 STUDENT_COMPLETION_RULES = (
     "Completion criteria:\n"
     "- The final answer must match the requested answer_type format exactly.\n"
     "- Do not output markdown fences, multiple alternative answers, or hidden reasoning notes.\n"
+    "- Keep the final answer as short as possible while staying complete.\n"
+    "- Use one line when possible; use multiple lines only when the contract explicitly needs them.\n"
     "- Before finalizing, verify that the answer is grounded in the question text and tool outputs only.\n"
     "- Before finalizing, check that the answer is at the correct planning depth for the task level."
 )
@@ -118,16 +122,21 @@ FORMAT_INSTRUCTIONS = {
         "Do not wrap it in code, markdown, or prose."
     ),
     "text": (
-        "Return a direct machine-readable answer. "
-        "For single-step retrosynthesis tasks, return the immediate precursors only and state the disconnection briefly. "
-        "Do not give a longer route, earlier building blocks, or meta commentary about the benchmark, instructions, or hidden context."
+        "Return a compact machine-readable answer. "
+        "For single-step retrosynthesis tasks, use exactly these lines when applicable: "
+        "'Answer: <immediate precursor 1>; <immediate precursor 2>' and "
+        "'Disconnection: <very short bond-change description>'. "
+        "Do not give a longer route, earlier building blocks, or meta commentary."
     ),
     "reaction_description": (
-        "Return a direct machine-readable chemistry answer. "
-        "If the task asks for reaction center or mechanistic class, answer that exact local question and do not replace it with a broad reaction summary."
+        "Return a compact machine-readable chemistry answer. "
+        "Use only the exact local transformation information requested. "
+        "Do not replace a reaction-center or mechanistic-class answer with a broad reaction summary."
     ),
     "full_synthesis": (
-        "Return a structured route answer with connected steps, key intermediates, and the final target-reaching step. "
+        "Return a compact structured route with connected steps. "
+        "Preferred format: 'Answer: Step 1: ... | Step 2: ... | Step 3: ...'. "
+        "Include key intermediates and the final target-reaching step. "
         "Do not answer with only a high-level retrosynthetic idea."
     ),
 }

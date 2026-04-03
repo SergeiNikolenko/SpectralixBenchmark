@@ -42,7 +42,7 @@ If schema-related assumptions change, update:
 
 - Use `uv run` for repository scripts.
 - Prefer smoke runs on `*_eval.jsonl` subsets before full runs.
-- Keep sandbox assumptions explicit (`docker` for production integrity, `local` for development checks).
+- Keep sandbox assumptions explicit (`openshell` for production integrity, `local` for development checks).
 
 ## Documentation Hygiene
 

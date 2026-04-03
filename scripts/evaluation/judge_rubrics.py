@@ -6,16 +6,14 @@ from typing import Any, Dict, List
 GENERIC_G_EVAL_SPEC = {
     "criteria": [
         "Chemical correctness relative to the canonical answer",
-        "Relevance to the question being asked",
-        "Completeness of the final answer for the requested answer type",
-        "Absence of contradictions or materially incorrect claims",
+        "Match to the requested task contract",
+        "Presence of key required elements without material contradictions",
     ],
     "evaluation_steps": [
         "Identify the core chemistry claim in the canonical answer.",
-        "Compare the student answer against that claim for correctness.",
-        "Check whether key required elements are present or missing.",
-        "Check whether the answer contains chemistry contradictions or incompatible statements.",
-        "Assign a rubric score from 0 to 10 based on overall correctness and completeness.",
+        "Check whether the student answer matches the same task and planning depth.",
+        "Check whether key required elements are present and chemically plausible.",
+        "Assign a rubric score from 0 to 10.",
     ],
     "rubric": [
         "0 = entirely incorrect, incompatible, or missing",
@@ -32,16 +30,14 @@ G_EVAL_SPECS: Dict[str, Dict[str, List[str]]] = {
     "text": GENERIC_G_EVAL_SPEC,
     "reaction_description": {
         "criteria": [
-            "Correct identification of the main transformation",
-            "Chemical plausibility of mechanism, selectivity, or reagents if mentioned",
-            "Coverage of the essential reaction outcome",
-            "Absence of incorrect reaction claims",
+            "Correct identification of the requested local transformation",
+            "Chemical plausibility of any mechanism, selectivity, or reagent claims",
+            "Coverage of the essential local reaction outcome without contradictions",
         ],
         "evaluation_steps": [
-            "Identify the expected reaction outcome from the canonical answer.",
-            "Check whether the student described the same transformation.",
-            "Check whether any stated reagent, mechanism, or selectivity claim is chemically plausible.",
-            "Check whether critical reaction details are missing or contradicted.",
+            "Identify the local transformation or label required by the canonical answer.",
+            "Check whether the student answered that exact local question rather than a broader summary.",
+            "Check whether any chemistry claims are plausible and whether critical local details are missing.",
             "Assign a rubric score from 0 to 10.",
         ],
         "rubric": GENERIC_G_EVAL_SPEC["rubric"],
@@ -64,16 +60,14 @@ G_EVAL_SPECS: Dict[str, Dict[str, List[str]]] = {
     },
     "full_synthesis": {
         "criteria": [
-            "Validity of the proposed synthetic route relative to the canonical answer",
-            "Chemical plausibility of key intermediates, reagents, and transformations",
-            "Coverage of critical steps required to reach the target",
-            "Absence of fatal route contradictions",
+            "Route plausibility toward the target",
+            "Connected multistep structure with chemically plausible key intermediates or transformations",
+            "Coverage of critical target-reaching steps without fatal contradictions",
         ],
         "evaluation_steps": [
-            "Identify the essential route or target transformation in the canonical answer.",
-            "Check whether the student route can plausibly reach the same target.",
-            "Check whether key intermediates, reagents, or transformations are chemically valid.",
-            "Check whether critical steps are missing or contradicted.",
+            "Identify the essential target-reaching route requirement from the canonical answer.",
+            "Check whether the student route is connected and can plausibly reach the same target.",
+            "Check whether key intermediates or transformations are chemically valid and whether critical steps are missing.",
             "Assign a rubric score from 0 to 10.",
         ],
         "rubric": GENERIC_G_EVAL_SPEC["rubric"],
@@ -81,9 +75,57 @@ G_EVAL_SPECS: Dict[str, Dict[str, List[str]]] = {
 }
 
 
-def get_g_eval_spec(answer_type: Any) -> Dict[str, List[str]]:
-    normalized = str(answer_type or "").strip().lower()
-    spec = G_EVAL_SPECS.get(normalized, GENERIC_G_EVAL_SPEC)
+LEVEL_SPEC_OVERRIDES: Dict[str, Dict[str, List[str]]] = {
+    "a": G_EVAL_SPECS["reaction_description"],
+    "b": {
+        "criteria": [
+            "Correct immediate precursor set for one retrosynthetic step",
+            "Correct main disconnection at the requested planning depth",
+            "Credit chemically plausible immediate alternatives, but penalize earlier retrosynthetic jumps or unrelated routes",
+        ],
+        "evaluation_steps": [
+            "Identify the expected immediate precursor set and main disconnection from the canonical answer.",
+            "Check whether the student proposed immediate precursors rather than earlier building blocks or a multistep plan.",
+            "Check whether the student disconnection is chemically plausible and aligned with the same target-forming step.",
+            "Assign a rubric score from 0 to 10.",
+        ],
+        "rubric": GENERIC_G_EVAL_SPEC["rubric"],
+    },
+    "c": G_EVAL_SPECS["full_synthesis"],
+}
+
+
+def get_g_eval_spec(
+    answer_type: Any,
+    *,
+    level: Any = None,
+    task_subtype: Any = None,
+) -> Dict[str, List[str]]:
+    normalized_answer_type = str(answer_type or "").strip().lower()
+    normalized_level = str(level or "").strip().lower()
+    normalized_task_subtype = str(task_subtype or "").strip().lower()
+
+    spec = G_EVAL_SPECS.get(normalized_answer_type, GENERIC_G_EVAL_SPEC)
+
+    if normalized_level in LEVEL_SPEC_OVERRIDES:
+        spec = LEVEL_SPEC_OVERRIDES[normalized_level]
+
+    if normalized_level == "b" and normalized_task_subtype == "immediate_precursor_with_disconnection":
+        spec = {
+            "criteria": [
+                "Correct immediate precursor set",
+                "Explicit and correct main disconnection",
+                "No jump to earlier retrosynthetic stages or unrelated alternatives",
+            ],
+            "evaluation_steps": [
+                "Identify the canonical immediate precursor set and disconnection.",
+                "Check whether the student answer includes both immediate precursors and a matching disconnection.",
+                "Penalize answers that skip backward to earlier building blocks or propose a different route family.",
+                "Assign a rubric score from 0 to 10.",
+            ],
+            "rubric": GENERIC_G_EVAL_SPEC["rubric"],
+        }
+
     return {
         "criteria": list(spec["criteria"]),
         "evaluation_steps": list(spec["evaluation_steps"]),

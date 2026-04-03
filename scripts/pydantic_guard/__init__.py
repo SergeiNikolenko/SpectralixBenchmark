@@ -1,4 +1,4 @@
-"""PydanticAI guard layer that augments existing smolagents-based pipelines."""
+"""PydanticAI guard layer that augments the OpenShell-based runtime pipeline."""
 
 from .judge_structured import run_structured_judge
 from .parser_repair import repair_parsed_questions

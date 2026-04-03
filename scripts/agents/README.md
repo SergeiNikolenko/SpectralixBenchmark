@@ -5,9 +5,11 @@ This package contains the production runtime used by evaluation and parsing pipe
 ## Modules
 
 - `runtime.py`: high-level orchestration and error mapping
-- `config.py`: default config + YAML loading + Docker executor kwargs
-- `models.py`: OpenAI-compatible model URL and auth handling
+- `config.py`: default config + YAML loading + OpenShell executor settings
+- `models.py`: OpenAI-compatible model URL handling and managed-inference settings
 - `tool_registry.py`: custom tool definitions and tool profile assembly
+- `openshell_manager.py`: gateway, provider, reusable sandbox, and managed inference lifecycle
+- `openshell_worker.py`: sandbox-local chat loop and tool execution against `https://inference.local/v1`
 - `prompts.py`: task prompt builders for student and parser stages
 - `agent_config.yaml`: default runtime/sandbox/tool policy
 
@@ -15,10 +17,9 @@ This package contains the production runtime used by evaluation and parsing pipe
 
 - Keep output contracts unchanged at pipeline boundaries.
 - Fail fast on invalid runtime configuration.
-- Default to Docker sandbox with restricted privileges.
+- Default to OpenShell sandbox execution.
 - Allow tools only through explicit profile selection and host allowlists.
-- Reuse one initialized `CodeAgent` session per runtime instance to reduce overhead.
 - Keep container egress disabled by default (`security.allow_network_tools: false`).
 - Do not pass benchmark identifiers/paths into student prompts.
-- Do not mount workspace into Docker sandbox unless explicitly required.
-- Keep `smolagents` as orchestration runtime; use `PydanticAI` only as a typed guard layer.
+- Keep the local executor as a debugging fallback only.
+- Keep `PydanticAI` as a typed guard layer above the runtime.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -26,12 +27,38 @@ class JudgeResult(BaseModel):
     llm_score: float = Field(ge=0.0, le=1.0)
     llm_comment: str = Field(default="")
 
+    @field_validator("llm_comment", mode="before")
+    @classmethod
+    def _normalize_llm_comment(cls, value):
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @field_validator("llm_comment")
+    @classmethod
+    def _validate_llm_comment(cls, value: str) -> str:
+        if value and re.fullmatch(r"[0-9./\s]+", value):
+            raise ValueError("llm_comment must contain a diagnostic explanation, not only a score")
+        return value
+
 
 class GEvalJudgeResult(BaseModel):
     criteria_steps: list[str] = Field(default_factory=list)
     step_findings: list[str] = Field(default_factory=list)
     rubric_score_0_to_10: int = Field(ge=0, le=10)
-    llm_comment: str = Field(min_length=1)
+    llm_comment: str = Field(min_length=8)
+
+    @field_validator("llm_comment", mode="before")
+    @classmethod
+    def _normalize_g_eval_comment(cls, value):
+        return str(value or "").strip()
+
+    @field_validator("llm_comment")
+    @classmethod
+    def _validate_g_eval_comment(cls, value: str) -> str:
+        if re.fullmatch(r"[0-9./\s]+", value):
+            raise ValueError("llm_comment must contain a diagnostic explanation, not only a score")
+        return value
 
 
 class StudentGuardOutput(BaseModel):

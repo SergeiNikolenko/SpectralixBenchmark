@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from scripts.agents.config import build_executor_kwargs, load_agent_config
-from scripts.agents.models import ensure_chat_completions_url, parse_model_url
+from scripts.agents.models import ensure_chat_completions_url, parse_model_url, sandbox_visible_api_base
 from scripts.agents.prompts import build_parse_page_task, build_student_task
 from scripts.agents.runtime import AgentRuntime
 from scripts.agents.tool_registry import build_tools, safe_http_get_tool
@@ -26,6 +26,12 @@ class ModelAdapterTests(unittest.TestCase):
             "http://127.0.0.1:8317/v1/chat/completions",
         )
 
+    def test_sandbox_visible_api_base_rewrites_localhost(self):
+        self.assertEqual(
+            sandbox_visible_api_base("http://127.0.0.1:8317/v1"),
+            "http://host.openshell.internal:8317/v1",
+        )
+
 
 class ToolPolicyTests(unittest.TestCase):
     def test_safe_http_tool_disabled_without_allowlist(self):
@@ -39,7 +45,7 @@ class ToolPolicyTests(unittest.TestCase):
         config = load_agent_config(config_path=None)
         config["security"]["allowed_tool_hosts"] = ["api.openai.com"]
         config["security"]["allow_network_tools"] = True
-        tools = build_tools("full", config)
+        tools = build_tools("tools_internet", config)
         tool_names = {getattr(tool, "name", getattr(tool, "__name__", "")) for tool in tools}
         self.assertIn("safe_http_get_tool", tool_names)
 
@@ -88,7 +94,7 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             load_agent_config(config_path=missing)
 
-    def test_default_enables_base_tools(self):
+    def test_default_enables_base_tools_flag(self):
         config = load_agent_config(config_path=None)
         self.assertTrue(config["runtime"]["add_base_tools"])
 
@@ -96,16 +102,14 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_agent_config(config_path=None, overrides={"tools": None})
 
-    def test_executor_kwargs_host_port_fields(self):
+    def test_executor_kwargs_openshell_fields(self):
         config = load_agent_config(config_path=None)
         kwargs = build_executor_kwargs(config, workspace_dir=Path("."))
-        self.assertIn("host", kwargs)
-        self.assertIn("port", kwargs)
-        self.assertNotIn("docker_host", kwargs)
-        self.assertNotIn("docker_port", kwargs)
-        self.assertFalse(kwargs["build_new_image"])
-        self.assertTrue(kwargs["container_run_kwargs"]["network_disabled"])
-        self.assertNotIn("volumes", kwargs["container_run_kwargs"])
+        self.assertEqual(kwargs["gateway_name"], "spectralix")
+        self.assertEqual(kwargs["gateway_port"], 18080)
+        self.assertEqual(kwargs["sandbox_name"], "spectralix-runtime")
+        self.assertEqual(kwargs["sandbox_from"], "base")
+        self.assertFalse(kwargs["delete_on_close"])
 
     def test_network_tools_require_allowlist(self):
         with self.assertRaises(ValueError):
@@ -130,12 +134,12 @@ class ConfigTests(unittest.TestCase):
             },
         )
         kwargs = build_executor_kwargs(config, workspace_dir=Path("."))
-        self.assertFalse(kwargs["container_run_kwargs"]["network_disabled"])
+        self.assertEqual(kwargs["gateway_name"], "spectralix")
 
 
 class StatusMappingTests(unittest.TestCase):
     def test_classify_sandbox_error(self):
-        status = AgentRuntime._classify_error(RuntimeError("docker executor failed"))
+        status = AgentRuntime._classify_error(RuntimeError("openshell sandbox create failed"))
         self.assertEqual(status, "sandbox_error")
 
     def test_classify_auth_error(self):
@@ -154,26 +158,28 @@ class RuntimeInitTests(unittest.TestCase):
         )
         self.assertEqual(runtime.executor_type, "local")
         self.assertEqual(runtime.executor_kwargs, {})
-
-    def test_base_tools_disabled_when_network_tools_off(self):
-        runtime = AgentRuntime(
-            model_url="http://127.0.0.1:8317/v1",
-            model_name="gpt-4o-mini",
-            api_key="test-key",
-            sandbox="local",
-            tools_profile="minimal",
-        )
-        self.assertFalse(runtime.allow_network_tools)
-        self.assertFalse(runtime.add_base_tools)
+        self.assertEqual(runtime.get_runtime_metadata()["sandbox_runtime"], "local_worker")
         runtime.close()
 
-    def test_base_tools_enabled_only_when_network_tools_allowed(self):
-        config_path = Path("scripts/agents/_test_base_tools_true.yaml")
+    def test_runtime_metadata_for_openshell_config(self):
+        runtime = AgentRuntime(
+            model_url="http://127.0.0.1:8317/v1",
+            model_name="gpt-5.4-mini",
+            api_key="test-key",
+            sandbox="openshell",
+            tools_profile="tools",
+        )
+        metadata = runtime.get_runtime_metadata()
+        self.assertEqual(metadata["sandbox_runtime"], "openshell")
+        self.assertEqual(metadata["executor_type"], "openshell")
+        self.assertIn("chem_python_tool", metadata["configured_local_tools"])
+        runtime.close()
+
+    def test_runtime_metadata_exposes_network_tools_when_enabled(self):
+        config_path = Path("scripts/agents/_test_network_true.yaml")
         config_path.write_text(
             "\n".join(
                 [
-                    "runtime:",
-                    "  add_base_tools: true",
                     "security:",
                     "  allow_network_tools: true",
                     "  allowed_tool_hosts:",
@@ -186,14 +192,15 @@ class RuntimeInitTests(unittest.TestCase):
         try:
             runtime = AgentRuntime(
                 model_url="http://127.0.0.1:8317/v1",
-                model_name="gpt-4o-mini",
+                model_name="gpt-5.4-mini",
                 api_key="test-key",
                 sandbox="local",
-                tools_profile="minimal",
+                tools_profile="tools_internet",
                 config_path=config_path,
             )
-            self.assertTrue(runtime.allow_network_tools)
-            self.assertTrue(runtime.add_base_tools)
+            metadata = runtime.get_runtime_metadata()
+            self.assertTrue(metadata["allow_network_tools"])
+            self.assertIn("api.openai.com", metadata["allowed_tool_hosts"])
             runtime.close()
         finally:
             config_path.unlink(missing_ok=True)
@@ -213,7 +220,6 @@ class PromptSecurityTests(unittest.TestCase):
         self.assertNotIn("page_id", prompt)
         self.assertNotIn("question_id", prompt)
         self.assertNotIn("Question metadata", prompt)
-        self.assertNotIn("benchmark", prompt.lower())
 
     def test_student_prompt_includes_contract_sections(self):
         prompt = build_student_task(

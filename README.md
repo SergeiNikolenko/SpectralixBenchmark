@@ -10,15 +10,15 @@ Benchmark and evaluation tooling for chemistry-focused AI systems:
 
 Production evaluation runtime:
 
-1. `smolagents` as the base orchestration/runtime layer
-2. Docker sandbox for tool-capable execution
+1. `OpenShell` as the sandboxed execution/runtime layer
+2. OpenShell-managed inference routed through `https://inference.local/v1`
 3. `PydanticAI` guard layer for structured validation/repair/retry
-
-The guard layer does not replace `smolagents`; it only hardens output quality.
 
 Primary runtime/config files:
 
 - `scripts/agents/runtime.py`
+- `scripts/agents/openshell_manager.py`
+- `scripts/agents/openshell_worker.py`
 - `scripts/agents/tool_registry.py`
 - `scripts/agents/agent_config.yaml`
 - `scripts/pydantic_guard/*`
@@ -49,15 +49,15 @@ Legacy compatibility dataset (still supported): `benchmark/benchmark_v1_0.jsonl`
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.12+
 - `uv`
 - Local proxy (OpenAI-compatible) or direct OpenAI-compatible endpoint
-- Docker daemon for production sandbox mode
+- Docker daemon for local OpenShell gateway deployment
 
 Repository root:
 
 ```bash
-cd /Users/nikolenko/.codex/worktrees/e20d/SpectralixBenchmark
+cd /path/to/SpectralixBenchmark
 ```
 
 Install dependencies:
@@ -111,8 +111,7 @@ uv run python -m scripts.evaluation.materialize_benchmark_v3_eval \
   --output benchmark/benchmark_v3_eval.jsonl
 ```
 
-Then run the matrix pipeline against that materialized benchmark. If Docker is
-not available locally, use `--agent-sandbox local` for debugging runs.
+Then run the matrix pipeline against that materialized benchmark.
 
 ```bash
 uv run python -m scripts.evaluation.run_full_matrix \
@@ -126,7 +125,8 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --judge-method g_eval \
   --judge-g-eval-fallback-structured true \
   --judge-reasoning-effort medium \
-  --agent-sandbox local \
+  --agent-sandbox openshell \
+  --agent-tools-profile minimal \
   --trace-log-enabled true
 ```
 
@@ -148,8 +148,8 @@ uv run python -m scripts.evaluation.student_validation \
   --api-base-url "$API_BASE_URL" \
   --model-name "gpt-5-codex-mini" \
   --api-key "$CLIPROXY_API_KEY" \
-  --agent-sandbox docker \
-  --agent-tools-profile full \
+  --agent-sandbox openshell \
+  --agent-tools-profile minimal \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
@@ -182,8 +182,8 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --api-key "$CLIPROXY_API_KEY" \
   --models gpt-5-codex-mini \
   --judge-model gpt-5-codex-mini \
-  --agent-sandbox docker \
-  --agent-tools-profile full \
+  --agent-sandbox openshell \
+  --agent-tools-profile minimal \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
@@ -232,33 +232,40 @@ uv run python benchmark_collection.py
 
 Default policy in `scripts/agents/agent_config.yaml`:
 
-- Built-in smolagents base tools are enabled (`runtime.add_base_tools: true`)
+- OpenShell sandbox is the default executor (`sandbox.executor_type: openshell`)
+- Local helper tools are selected by profile (`no_tools`, `minimal`, `tools`, `tools_internet`)
 - Internet tools are disabled (`security.allow_network_tools: false`)
 - `safe_http_get_tool` is not available unless network tools are explicitly enabled
 - Tool network access is host-allowlisted only (`security.allowed_tool_hosts`)
-- In Docker mode, workspace is not mounted by default (`mount_workspace_readonly: false`)
+- OpenShell policy allows only the sandbox workdir plus explicit temp paths
+- Sandbox traffic uses `https://inference.local/v1`; upstream credentials stay in the host-side OpenShell provider config
 - Student prompt excludes benchmark identifiers (`exam_id/page_id/question_id`)
 
 This means internet access is controlled, not unrestricted.
 
 ## Sandbox Modes
 
-- `--agent-sandbox docker`:
-  - Recommended for production
-  - Requires Docker daemon
-  - Enforces container restrictions
+- `--agent-sandbox openshell`:
+  - Recommended runtime
+  - Uses OpenShell gateway + sandbox policy enforcement
+  - Supports tool/network controls through policy + tool profiles
 - `--agent-sandbox local`:
   - Development fallback
-  - No container isolation and weak benchmark integrity guarantees
+  - No sandbox isolation and weak benchmark integrity guarantees
   - Do not use for production benchmarking
 
 ## Troubleshooting
 
-`Docker preflight failed`
+`OpenShell preflight failed`
 
 - Start Docker Desktop / daemon
 - Validate with `docker info`
-- Retry with `--agent-sandbox docker`
+- Start or recreate the local OpenShell gateway:
+
+```bash
+openshell gateway start --name spectralix --port 18080 --plaintext --recreate
+```
+- Retry with `--agent-sandbox openshell`
 
 `401 Unauthorized` from proxy/model endpoint
 

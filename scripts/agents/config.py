@@ -40,35 +40,38 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
         "enforce_container_network_isolation": True,
     },
     "sandbox": {
-        "executor_type": "docker",
-        "docker": {
-            "image_name": "spectralix-smolagent-sandbox",
-            "build_new_image": False,
-            "mount_workspace_readonly": False,
-            "host": "127.0.0.1",
-            "port": 8888,
-            "container_run_kwargs": {
-                "read_only": True,
-                "user": "65534:65534",
-                "mem_limit": "768m",
-                "nano_cpus": 1_000_000_000,
-                "pids_limit": 128,
-                "cap_drop": ["ALL"],
-                "security_opt": ["no-new-privileges"],
-                "tmpfs": {
-                    "/tmp": "rw,noexec,nosuid,size=128m",
-                },
-            },
+        "executor_type": "openshell",
+        "openshell": {
+            "gateway_name": "spectralix",
+            "gateway_port": 18080,
+            "gateway_plaintext": True,
+            "auto_start_gateway": True,
+            "sandbox_name": "spectralix-runtime",
+            "sandbox_from": "base",
+            "ready_timeout_seconds": 180,
+            "delete_on_close": False,
         },
     },
     "tools": {
         "profiles": {
-            "minimal": [
+            "no_tools": [],
+            "minimal": [],
+            "tools": [
                 "chem_format_tool",
                 "smiles_sanity_tool",
                 "unit_convert_tool",
                 "rubric_hint_tool",
                 "json_array_validate_tool",
+                "chem_python_tool",
+            ],
+            "tools_internet": [
+                "chem_format_tool",
+                "smiles_sanity_tool",
+                "unit_convert_tool",
+                "rubric_hint_tool",
+                "json_array_validate_tool",
+                "chem_python_tool",
+                "safe_http_get_tool",
             ],
             "full": [
                 "chem_format_tool",
@@ -77,7 +80,6 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
                 "rubric_hint_tool",
                 "json_array_validate_tool",
                 "chem_python_tool",
-                "safe_http_get_tool",
             ],
         },
         "mcp": {
@@ -88,7 +90,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
 }
 
 REQUIRED_CONFIG_SECTIONS = ("model", "runtime", "security", "sandbox", "tools")
-SUPPORTED_EXECUTORS = {"local", "docker"}
+SUPPORTED_EXECUTORS = {"local", "openshell"}
 SUPPORTED_REASONING_EFFORTS = {"low", "medium", "high"}
 
 
@@ -165,10 +167,10 @@ def validate_agent_config(config: Dict[str, Any]) -> Dict[str, Any]:
             f"Unsupported sandbox executor_type '{executor_type}'. Supported: {sorted(SUPPORTED_EXECUTORS)}"
         )
 
-    if executor_type == "docker":
-        docker_cfg = sandbox.get("docker")
-        if not isinstance(docker_cfg, dict):
-            raise ValueError("Agent config sandbox.docker must be a mapping for docker executor")
+    if executor_type == "openshell":
+        openshell_cfg = sandbox.get("openshell")
+        if not isinstance(openshell_cfg, dict):
+            raise ValueError("Agent config sandbox.openshell must be a mapping for openshell executor")
 
     security = _require_mapping(config, "security")
     allowed_hosts = security.get("allowed_tool_hosts", [])
@@ -217,43 +219,20 @@ def load_agent_config(config_path: Optional[Path] = None, overrides: Optional[Di
 
 
 def build_executor_kwargs(config: Dict[str, Any], workspace_dir: Path) -> Dict[str, Any]:
+    _ = workspace_dir
     sandbox = config.get("sandbox", {})
-    docker_cfg = sandbox.get("docker", {})
+    executor_type = str(sandbox.get("executor_type") or "").strip().lower()
+    if executor_type != "openshell":
+        return {}
 
-    container_run_kwargs = deepcopy(docker_cfg.get("container_run_kwargs", {}))
-    security_cfg = config.get("security", {})
-    allow_network_tools = bool(security_cfg.get("allow_network_tools", False))
-    enforce_network_isolation = bool(security_cfg.get("enforce_container_network_isolation", True))
-    for key, default_value in (
-        ("read_only", True),
-        ("user", "65534:65534"),
-        ("cap_drop", ["ALL"]),
-        ("security_opt", ["no-new-privileges"]),
-    ):
-        container_run_kwargs.setdefault(key, default_value)
-
-    volumes = dict(container_run_kwargs.get("volumes") or {})
-    if bool(docker_cfg.get("mount_workspace_readonly", False)):
-        volumes[str(workspace_dir.resolve())] = {"bind": "/workspace", "mode": "ro"}
-    if volumes:
-        container_run_kwargs["volumes"] = volumes
-    else:
-        container_run_kwargs.pop("volumes", None)
-    if enforce_network_isolation:
-        container_run_kwargs["network_disabled"] = not allow_network_tools
-        if not allow_network_tools:
-            container_run_kwargs.pop("network_mode", None)
-
-    executor_kwargs: Dict[str, Any] = {
-        "host": docker_cfg.get("host") or "127.0.0.1",
-        "port": int(docker_cfg.get("port") or 8888),
-        "image_name": docker_cfg.get("image_name", "spectralix-smolagent-sandbox"),
-        "build_new_image": bool(docker_cfg.get("build_new_image", False)),
-        "container_run_kwargs": container_run_kwargs,
+    openshell_cfg = sandbox.get("openshell", {})
+    return {
+        "gateway_name": str(openshell_cfg.get("gateway_name") or "spectralix"),
+        "gateway_port": int(openshell_cfg.get("gateway_port") or 18080),
+        "gateway_plaintext": bool(openshell_cfg.get("gateway_plaintext", True)),
+        "auto_start_gateway": bool(openshell_cfg.get("auto_start_gateway", True)),
+        "sandbox_name": str(openshell_cfg.get("sandbox_name") or "spectralix-runtime"),
+        "sandbox_from": str(openshell_cfg.get("sandbox_from") or "base"),
+        "ready_timeout_seconds": float(openshell_cfg.get("ready_timeout_seconds") or 180),
+        "delete_on_close": bool(openshell_cfg.get("delete_on_close", False)),
     }
-
-    dockerfile_content = docker_cfg.get("dockerfile_content")
-    if dockerfile_content:
-        executor_kwargs["dockerfile_content"] = dockerfile_content
-
-    return executor_kwargs

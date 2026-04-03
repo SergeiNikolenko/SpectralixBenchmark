@@ -485,13 +485,13 @@ class ExamPipeline:
                     api_key=Config.OPENAI_API_KEY,
                     config_path=agent_config_path,
                     max_steps=agent_max_steps,
-                    sandbox="docker",
-                    tools_profile="full",
+                    sandbox="openshell",
+                    tools_profile="minimal",
                     timeout_sec=Config.TIMEOUT,
                 )
                 self.logger.info(
                     "Parser agent runtime initialized successfully "
-                    f"(model={Config.MODEL_MARKER}, sandbox=docker)"
+                    f"(model={Config.MODEL_MARKER}, sandbox=openshell)"
                 )
             except Exception as exc:
                 self.logger.error(f"Failed to initialize parser agent runtime: {exc}")
@@ -697,7 +697,7 @@ def _str_to_bool(value: str) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Exam parsing pipeline with optional smolagents runtime")
+    parser = argparse.ArgumentParser(description="Exam parsing pipeline with optional OpenShell runtime")
     parser.add_argument(
         "--agent-enabled",
         type=_str_to_bool,

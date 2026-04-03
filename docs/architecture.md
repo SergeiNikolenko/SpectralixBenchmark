@@ -6,13 +6,13 @@
 - Enforce sandboxed execution for tool-capable model runs.
 - Preserve deterministic scoring and reproducible evaluation outputs.
 - Keep a single production runtime for student-stage inference (no legacy backend).
-- Keep `smolagents` as the base runtime while adding strict structured guards via `PydanticAI`.
+- Keep a single OpenShell-backed runtime while adding strict structured guards via `PydanticAI`.
 
 ## High-Level Flow
 
 1. `student_validation.py`
 - Reads benchmark rows
-- Produces `student_answer` per row via `smolagents`
+- Produces `student_answer` per row via `AgentRuntime`
 - Applies optional `PydanticAI` student guard (`on_failure|always|off`)
 - Writes `student_output.jsonl`
 
@@ -31,28 +31,37 @@
 - `config.py`
   - Default config
   - YAML loading and merge
-  - Docker executor kwargs assembly
+  - OpenShell executor settings assembly
 
 - `models.py`
   - OpenAI-compatible URL normalization
   - API key resolution
-  - `OpenAIModel` factory for `smolagents`
+  - OpenShell managed inference base selection (`https://inference.local/v1`)
+  - Upstream base URL rewriting for host-side provider configuration
 
 - `tool_registry.py`
   - Explicit tool set
   - Tool profile resolution
-  - Security-aware tool enablement (allowlist)
+  - Security-aware tool enablement (allowlist, network-tool gating)
 
 - `prompts.py`
   - Student and parser task prompt builders
 
 - `runtime.py`
   - `AgentRuntime` orchestration
-  - Sandbox execution via `CodeAgent`
-  - One-time Docker preflight before execution
-  - Per-question runtime reset to avoid stale context leakage across rows
-  - MCP tool loading (optional)
+  - One-time OpenShell sandbox preflight before execution
+  - Local or OpenShell worker execution
   - Runtime error normalization
+
+- `openshell_manager.py`
+  - Gateway health checks
+  - Provider + `inference.local` route configuration
+  - Sandbox lifecycle management
+  - Worker execution inside the sandbox
+
+- `openshell_worker.py`
+  - OpenAI-compatible chat loop inside the sandbox against `https://inference.local/v1`
+  - Tool invocation and step capture
 
 ## Guard Layer (`scripts/pydantic_guard/`)
 
@@ -73,13 +82,18 @@
 
 ## Security Model
 
-- Sandbox: Docker (`executor_type=docker`)
-- Workspace mount: disabled by default (`mount_workspace_readonly: false`)
-- Privilege drop: non-root, `cap_drop=ALL`, `no-new-privileges`
+- Sandbox: OpenShell (`executor_type=openshell`)
+- Workspace: sandbox workdir only (`/sandbox`)
+- Inference:
+  - host-side OpenShell provider points at the upstream OpenAI-compatible endpoint
+  - sandbox-visible client traffic uses `https://inference.local/v1`
+- Process policy:
+  - non-root sandbox user inside the runtime image
+  - local execution fallback only for debugging
 - Tool policy:
-  - shell/file-write tools disabled by default
-  - container network disabled by default
+  - local tools selected by profile
   - outbound HTTP restricted by host allowlist
+  - network tools disabled by default
   - MCP disabled by default
 
 See `docs/security_runbook.md` for operational controls.
@@ -104,7 +118,6 @@ These values are persisted to `student_status` in output JSONL.
 - `student_output.jsonl` schema unchanged
 - `llm_judge_output.jsonl` schema unchanged
 - Existing `--model-url` supported
-- `smolagents` remains the only orchestration/runtime layer (not replaced by `PydanticAI`)
 - Added aliases for operational compatibility:
   - `--api-base-url`
   - `--models` (alias for `--student-models` in matrix runner)

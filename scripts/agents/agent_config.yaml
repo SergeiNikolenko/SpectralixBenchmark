@@ -30,35 +30,28 @@ security:
   enforce_container_network_isolation: true
 
 sandbox:
-  executor_type: docker
-  docker:
-    image_name: spectralix-smolagent-sandbox
-    build_new_image: false
-    mount_workspace_readonly: false
-    host: 127.0.0.1
-    port: 8888
-    container_run_kwargs:
-      read_only: true
-      user: "65534:65534"
-      mem_limit: "768m"
-      nano_cpus: 1000000000
-      pids_limit: 128
-      cap_drop:
-        - ALL
-      security_opt:
-        - no-new-privileges
-      tmpfs:
-        /tmp: rw,noexec,nosuid,size=128m
+  executor_type: openshell
+  openshell:
+    gateway_name: spectralix
+    gateway_port: 18080
+    gateway_plaintext: true
+    auto_start_gateway: true
+    sandbox_name: spectralix-runtime
+    sandbox_from: base
+    ready_timeout_seconds: 180
+    delete_on_close: false
 
 tools:
   profiles:
-    minimal:
+    no_tools: []
+    tools:
       - chem_format_tool
       - smiles_sanity_tool
       - unit_convert_tool
       - rubric_hint_tool
       - json_array_validate_tool
-    full:
+      - chem_python_tool
+    tools_internet:
       - chem_format_tool
       - smiles_sanity_tool
       - unit_convert_tool
@@ -66,6 +59,15 @@ tools:
       - json_array_validate_tool
       - chem_python_tool
       - safe_http_get_tool
+    minimal:
+      []
+    full:
+      - chem_format_tool
+      - smiles_sanity_tool
+      - unit_convert_tool
+      - rubric_hint_tool
+      - json_array_validate_tool
+      - chem_python_tool
   mcp:
     enabled: false
     servers: []

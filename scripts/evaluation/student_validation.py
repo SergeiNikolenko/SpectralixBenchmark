@@ -235,6 +235,70 @@ def _reasoning_tokens_from_model_output_message(model_output_message: Any) -> in
     return candidate if isinstance(candidate, int) else 0
 
 
+def _usage_from_model_output_message(model_output_message: Any) -> Dict[str, int]:
+    totals = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+    }
+    if not isinstance(model_output_message, dict):
+        return totals
+    raw = model_output_message.get("raw")
+    if not isinstance(raw, dict):
+        return totals
+    usage = raw.get("usage")
+    if not isinstance(usage, dict):
+        return totals
+
+    prompt_tokens = usage.get("prompt_tokens")
+    completion_tokens = usage.get("completion_tokens")
+    total_tokens = usage.get("total_tokens")
+    completion_details = usage.get("completion_tokens_details")
+
+    if isinstance(prompt_tokens, int):
+        totals["input_tokens"] = prompt_tokens
+    if isinstance(completion_tokens, int):
+        totals["output_tokens"] = completion_tokens
+    if isinstance(total_tokens, int):
+        totals["total_tokens"] = total_tokens
+    if isinstance(completion_details, dict):
+        candidate = completion_details.get("reasoning_tokens")
+        if isinstance(candidate, int):
+            totals["reasoning_tokens"] = candidate
+    if totals["total_tokens"] == 0:
+        totals["total_tokens"] = totals["input_tokens"] + totals["output_tokens"]
+    return totals
+
+
+def _extract_student_token_totals(agent_run_details: Optional[Dict[str, Any]]) -> Dict[str, int]:
+    totals = {
+        "student_input_tokens": 0,
+        "student_output_tokens": 0,
+        "student_total_tokens": 0,
+        "student_reasoning_tokens": 0,
+    }
+    if not isinstance(agent_run_details, dict):
+        return totals
+
+    steps = agent_run_details.get("steps")
+    if not isinstance(steps, list):
+        return totals
+
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        usage = _usage_from_model_output_message(step.get("model_output_message"))
+        totals["student_input_tokens"] += usage["input_tokens"]
+        totals["student_output_tokens"] += usage["output_tokens"]
+        totals["student_total_tokens"] += usage["total_tokens"]
+        totals["student_reasoning_tokens"] += usage["reasoning_tokens"]
+
+    if totals["student_total_tokens"] == 0:
+        totals["student_total_tokens"] = totals["student_input_tokens"] + totals["student_output_tokens"]
+    return totals
+
+
 def _compact_run_details(agent_run_details: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(agent_run_details, dict):
         return None
@@ -261,6 +325,8 @@ def _compact_run_details(agent_run_details: Optional[Dict[str, Any]]) -> Optiona
                 if isinstance(content, dict):
                     thought = _truncate_text(content.get("thought"), limit=500)
                     code = str(content.get("code") or "")
+                elif isinstance(content, str):
+                    thought = _truncate_text(content, limit=500)
 
             tool_calls_src = step.get("tool_calls")
             tool_calls: List[Dict[str, Any]] = []
@@ -269,8 +335,9 @@ def _compact_run_details(agent_run_details: Optional[Dict[str, Any]]) -> Optiona
                     if not isinstance(tool_call, dict):
                         continue
                     function = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
-                    name = str(function.get("name") or "")
-                    arguments_preview = _truncate_text(function.get("arguments"), limit=240)
+                    name = str(function.get("name") or tool_call.get("name") or "")
+                    arguments_source = function.get("arguments") if function else tool_call.get("arguments")
+                    arguments_preview = _truncate_text(arguments_source, limit=240)
                     tool_calls.append(
                         {
                             "name": name,
@@ -644,11 +711,16 @@ def _build_student_result_row(
     student_status: str,
     student_error: str,
     elapsed_ms: int,
+    token_totals: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
+    token_totals = token_totals or {}
     return {
         "exam_id": question.get("exam_id"),
         "page_id": question.get("page_id"),
         "question_id": question.get("question_id"),
+        "level": question.get("level"),
+        "task_subtype": question.get("task_subtype"),
+        "difficulty": question.get("difficulty"),
         "question_type": question.get("question_type"),
         "question_text": question.get("question_text"),
         "answer_type": question.get("answer_type"),
@@ -656,6 +728,10 @@ def _build_student_result_row(
         "student_status": student_status,
         "student_error": student_error,
         "student_elapsed_ms": elapsed_ms,
+        "student_input_tokens": int(token_totals.get("student_input_tokens") or 0),
+        "student_output_tokens": int(token_totals.get("student_output_tokens") or 0),
+        "student_total_tokens": int(token_totals.get("student_total_tokens") or 0),
+        "student_reasoning_tokens": int(token_totals.get("student_reasoning_tokens") or 0),
     }
 
 
@@ -707,8 +783,8 @@ def run_benchmark_inference(
     limit: Optional[int] = None,
     *,
     agent_max_steps: int = 6,
-    agent_sandbox: str = "docker",
-    agent_tools_profile: str = "full",
+    agent_sandbox: str = "openshell",
+    agent_tools_profile: str = "minimal",
     agent_config: Optional[Path] = Path("scripts/agents/agent_config.yaml"),
     api_key: Optional[str] = None,
     student_guard_enabled: bool = True,
@@ -737,7 +813,8 @@ def run_benchmark_inference(
             timeout_sec=timeout,
         )
         runtime.preflight()
-        runtime_metadata = runtime.get_runtime_metadata()
+        get_runtime_metadata = getattr(runtime, "get_runtime_metadata", None)
+        runtime_metadata = get_runtime_metadata() if callable(get_runtime_metadata) else None
     except AgentRuntimeError as exc:
         raise RuntimeError(f"Agent preflight failed: {exc.status}: {exc.message}") from exc
     except Exception as exc:
@@ -872,12 +949,14 @@ def run_benchmark_inference(
                         tool_usage_summary=tool_usage_summary,
                     )
 
+                token_totals = _extract_student_token_totals(runtime.get_last_run_details())
                 result = _build_student_result_row(
                     question=question,
                     student_answer=student_answer,
                     student_status=student_status,
                     student_error=student_error,
                     elapsed_ms=elapsed_ms,
+                    token_totals=token_totals,
                 )
 
                 f_out.write(json.dumps(result, ensure_ascii=False) + "\n")
@@ -919,7 +998,7 @@ def _resolve_model_url(model_url: Optional[str], api_base_url: Optional[str]) ->
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Benchmark student answers using an agentic runtime (smolagents)"
+        description="Benchmark student answers using an OpenShell-based agentic runtime"
     )
     parser.add_argument(
         "--benchmark-path",
@@ -990,14 +1069,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--agent-sandbox",
         type=str,
-        default="docker",
-        help="Agent executor type (default: docker)",
+        default="openshell",
+        help="Agent executor type (default: openshell)",
     )
     parser.add_argument(
         "--agent-tools-profile",
         type=str,
-        default="full",
-        help="Tools profile from config (default: full)",
+        default="minimal",
+        help="Tools profile from config (default: minimal)",
     )
     parser.add_argument(
         "--agent-config",

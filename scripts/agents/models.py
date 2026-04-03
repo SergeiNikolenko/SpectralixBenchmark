@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 import os
 
 CHAT_COMPLETIONS_SUFFIX = "/chat/completions"
 DEFAULT_API_PATH = "/v1"
+OPEN_SHELL_MANAGED_INFERENCE_BASE = "https://inference.local/v1"
+
+
+@dataclass(frozen=True)
+class ModelSettings:
+    model_name: str
+    api_base: str
+    api_key: str
+    temperature: float
+    max_tokens: int
+    reasoning_effort: str
+    requests_per_minute: int
+    upstream_api_base: Optional[str] = None
 
 
 def resolve_api_key(explicit_key: Optional[str] = None) -> Optional[str]:
@@ -36,12 +50,6 @@ def _resolve_api_path(path: str) -> str:
 
 
 def parse_model_url(model_url: str) -> Tuple[str, str]:
-    """
-    Convert full endpoint URL to OpenAI-compatible api_base.
-
-    Returns:
-        (api_base, chat_completions_url)
-    """
     cleaned = (model_url or "").strip()
     if not cleaned:
         raise ValueError("model_url must not be empty")
@@ -58,17 +66,34 @@ def parse_model_url(model_url: str) -> Tuple[str, str]:
 
 
 def ensure_chat_completions_url(model_url: str) -> str:
-    """Return a normalized /chat/completions endpoint URL."""
     _, chat_url = parse_model_url(model_url)
     return chat_url
 
 
-def build_openai_model(
+def _sandbox_host(hostname: str) -> str:
+    lowered = (hostname or "").strip().lower()
+    if lowered in {"127.0.0.1", "localhost"}:
+        return "host.openshell.internal"
+    return hostname
+
+
+def sandbox_visible_api_base(model_url: str) -> str:
+    parsed = urlparse(parse_model_url(model_url)[0])
+    host = _sandbox_host(parsed.hostname or "")
+    netloc = host
+    if parsed.port:
+        netloc = f"{host}:{parsed.port}"
+    return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
+
+
+def build_model_settings(
+    *,
     model_name: str,
     model_url: str,
-    api_key: Optional[str] = None,
+    api_key: Optional[str],
     model_kwargs: Optional[Dict[str, Any]] = None,
-):
+    sandbox_visible: bool = False,
+) -> ModelSettings:
     model_kwargs = dict(model_kwargs or {})
     resolved_api_key = resolve_api_key(api_key)
     if not resolved_api_key:
@@ -76,34 +101,17 @@ def build_openai_model(
             "API key not found. Set OPENAI_API_KEY (or AITUNNEL_API_KEY) or pass explicit api_key."
         )
 
-    api_base, _ = parse_model_url(model_url)
-
-    header_name = (os.getenv("OPENAI_API_KEY_HEADER") or "Authorization").strip() or "Authorization"
-    prefix = (os.getenv("OPENAI_API_KEY_PREFIX") or "Bearer").strip()
-    header_is_authorization = header_name.lower() == "authorization"
-    prefix_is_bearer = prefix.lower() == "bearer"
-
-    client_kwargs: Dict[str, Any] = {}
-    model_api_key = resolved_api_key
-
-    # Custom auth headers for gateways that do not use standard Authorization: Bearer.
-    if not (header_is_authorization and prefix_is_bearer):
-        token_value = f"{prefix} {resolved_api_key}".strip() if prefix else resolved_api_key
-        client_kwargs["default_headers"] = {header_name: token_value}
-        if not header_is_authorization:
-            model_api_key = "unused_api_key"
-
-    try:
-        from smolagents import OpenAIModel
-    except ImportError as exc:
-        raise ImportError(
-            "smolagents is not installed. Install with: pip install 'smolagents[docker]'"
-        ) from exc
-
-    return OpenAIModel(
-        model_id=model_name,
+    api_base = sandbox_visible_api_base(model_url) if sandbox_visible else parse_model_url(model_url)[0]
+    upstream_api_base = sandbox_visible_api_base(model_url) if sandbox_visible else None
+    if sandbox_visible:
+        api_base = OPEN_SHELL_MANAGED_INFERENCE_BASE
+    return ModelSettings(
+        model_name=model_name,
         api_base=api_base,
-        api_key=model_api_key,
-        client_kwargs=client_kwargs,
-        **model_kwargs,
+        api_key=resolved_api_key,
+        temperature=float(model_kwargs.get("temperature", 0.2)),
+        max_tokens=int(model_kwargs.get("max_tokens", 768)),
+        reasoning_effort=str(model_kwargs.get("reasoning_effort") or "medium"),
+        requests_per_minute=int(model_kwargs.get("requests_per_minute") or 0),
+        upstream_api_base=upstream_api_base,
     )
