@@ -215,8 +215,10 @@ class RunFullMatrixContractTests(unittest.TestCase):
             benchmark_path = tmp_path / "benchmark.jsonl"
             output_root = tmp_path / "runs"
             _write_benchmark(benchmark_path)
+            inference_kwargs_seen = {}
 
             def fake_run_benchmark_inference(**kwargs):
+                inference_kwargs_seen.update(kwargs)
                 output_path = Path(kwargs["output_path"])
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 rows = [
@@ -315,6 +317,8 @@ class RunFullMatrixContractTests(unittest.TestCase):
                             "http://127.0.0.1:8317/v1",
                             "--models",
                             "test-model",
+                            "--agent-backend",
+                            "codex_native",
                         ],
                     ):
                         run_full_matrix_module.main()
@@ -346,6 +350,7 @@ class RunFullMatrixContractTests(unittest.TestCase):
             summary_rows = json.loads(summary_json_path.read_text(encoding="utf-8"))
             self.assertEqual(len(summary_rows), 1)
             self.assertEqual(summary_rows[0]["model_name"], "test-model")
+            self.assertEqual(inference_kwargs_seen["agent_backend"], "codex_native")
 
 
 if __name__ == "__main__":

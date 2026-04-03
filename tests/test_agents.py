@@ -2,7 +2,7 @@ import unittest
 import os
 from pathlib import Path
 
-from scripts.agents.config import build_executor_kwargs, load_agent_config
+from scripts.agents.config import build_executor_kwargs, load_agent_config, resolve_runtime_backend
 from scripts.agents.models import ensure_chat_completions_url, parse_model_url, sandbox_visible_api_base
 from scripts.agents.prompts import build_parse_page_task, build_student_task
 from scripts.agents.runtime import AgentRuntime
@@ -110,6 +110,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(kwargs["sandbox_name"], "spectralix-runtime")
         self.assertEqual(kwargs["sandbox_from"], "base")
         self.assertFalse(kwargs["delete_on_close"])
+        self.assertEqual(kwargs["native_codex"]["sandbox_from"], "codex")
+
+    def test_runtime_backend_defaults_follow_executor(self):
+        config = load_agent_config(config_path=None)
+        self.assertEqual(resolve_runtime_backend(config, executor_type="openshell"), "openshell_worker")
+        self.assertEqual(resolve_runtime_backend(config, executor_type="local"), "local_worker")
 
     def test_network_tools_require_allowlist(self):
         with self.assertRaises(ValueError):
@@ -172,7 +178,24 @@ class RuntimeInitTests(unittest.TestCase):
         metadata = runtime.get_runtime_metadata()
         self.assertEqual(metadata["sandbox_runtime"], "openshell")
         self.assertEqual(metadata["executor_type"], "openshell")
+        self.assertEqual(metadata["runtime_backend"], "openshell_worker")
         self.assertIn("chem_python_tool", metadata["configured_local_tools"])
+        runtime.close()
+
+    def test_runtime_metadata_for_codex_native_backend(self):
+        runtime = AgentRuntime(
+            model_url="http://127.0.0.1:8317/v1",
+            model_name="gpt-5.4-mini",
+            api_key="test-key",
+            sandbox="openshell",
+            backend="codex_native",
+            tools_profile="minimal",
+        )
+        metadata = runtime.get_runtime_metadata()
+        self.assertEqual(metadata["executor_type"], "openshell")
+        self.assertEqual(metadata["runtime_backend"], "codex_native")
+        self.assertEqual(metadata["sandbox_runtime"], "openshell_codex_native")
+        self.assertFalse(metadata["managed_inference"])
         runtime.close()
 
     def test_runtime_metadata_exposes_network_tools_when_enabled(self):

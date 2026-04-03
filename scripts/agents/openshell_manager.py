@@ -48,6 +48,14 @@ class OpenShellManager:
         self.sandbox_from = str(self.executor_kwargs.get("sandbox_from") or "base")
         self.ready_timeout_seconds = float(self.executor_kwargs.get("ready_timeout_seconds") or 180)
         self.delete_on_close = bool(self.executor_kwargs.get("delete_on_close", False))
+        native_codex_cfg = dict(self.executor_kwargs.get("native_codex") or {})
+        self.native_codex_sandbox_name = str(native_codex_cfg.get("sandbox_name") or "spectralix-codex-runtime")
+        self.native_codex_sandbox_from = str(native_codex_cfg.get("sandbox_from") or "codex")
+        self.native_codex_bin = str(native_codex_cfg.get("codex_bin") or "codex")
+        self.native_codex_home_dir = str(native_codex_cfg.get("codex_home_dir") or "/sandbox/.codex")
+        self.native_codex_upload_auth_from = str(
+            native_codex_cfg.get("upload_auth_from") or "~/.codex/auth.json"
+        )
         self._handle: Optional[OpenShellSandboxHandle] = None
         self._client = None
 
@@ -131,13 +139,16 @@ class OpenShellManager:
         *,
         model_settings: ModelSettings,
         tools_profile: str,
+        backend: str = "openshell_worker",
     ) -> OpenShellSandboxHandle:
         if self._handle is not None:
             return self._handle
 
         self.ensure_gateway()
-        self._ensure_managed_inference(model_settings=model_settings)
-        sandbox_name = self.sandbox_name or f"spectralix-runtime-{_slug(model_settings.model_name)}-{uuid.uuid4().hex[:8]}"
+        if backend != "codex_native":
+            self._ensure_managed_inference(model_settings=model_settings)
+        sandbox_name = self._sandbox_name_for_backend(backend)
+        sandbox_from = self._sandbox_from_for_backend(backend)
         try:
             client = self._client_for_gateway()
             created_by_manager = False
@@ -156,7 +167,7 @@ class OpenShellManager:
                         "--name",
                         sandbox_name,
                         "--from",
-                        self.sandbox_from,
+                        sandbox_from,
                         "--no-tty",
                         "--",
                         "true",
@@ -175,7 +186,11 @@ class OpenShellManager:
                 created_by_manager=created_by_manager,
             )
             self._upload_runtime_sources(self._handle)
-            self._bootstrap_runtime_dependencies(self._handle, tools_profile=tools_profile)
+            if backend == "codex_native":
+                self._ensure_runtime_venv(self._handle)
+                self._bootstrap_codex_home(self._handle)
+            else:
+                self._bootstrap_runtime_dependencies(self._handle, tools_profile=tools_profile)
             return self._handle
         except Exception:
             raise
@@ -205,6 +220,33 @@ class OpenShellManager:
         stdout = self._text_output(result.stdout).strip()
         if not stdout:
             raise OpenShellManagerError("OpenShell worker returned empty stdout")
+        return json.loads(stdout)
+
+    def exec_codex_worker(
+        self,
+        *,
+        payload: Dict[str, Any],
+        timeout_seconds: int,
+    ) -> Dict[str, Any]:
+        if self._handle is None:
+            raise OpenShellManagerError("OpenShell sandbox has not been initialized")
+
+        result = self._client_for_gateway().exec(
+            self._handle.sandbox_id,
+            ["/sandbox/.venv/bin/python", "-m", "scripts.agents.codex_native_worker"],
+            workdir="/sandbox",
+            stdin=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            timeout_seconds=timeout_seconds,
+            env={"PYTHONUNBUFFERED": "1", "PYTHONPATH": "/sandbox"},
+        )
+        if result.exit_code != 0:
+            stderr = self._text_output(result.stderr).strip()
+            raise OpenShellManagerError(
+                f"OpenShell native Codex worker failed with exit_code={result.exit_code}: {stderr or 'unknown error'}"
+            )
+        stdout = self._text_output(result.stdout).strip()
+        if not stdout:
+            raise OpenShellManagerError("OpenShell native Codex worker returned empty stdout")
         return json.loads(stdout)
 
     def _gateway_is_healthy(self) -> bool:
@@ -260,6 +302,13 @@ class OpenShellManager:
         raise OpenShellManagerError(
             f"OpenShell CLI failed: {' '.join(command)} | stdout={stdout[:500]} | stderr={stderr[:500]}"
         )
+
+    def _sandbox_name_for_backend(self, backend: str) -> str:
+        base_name = self.native_codex_sandbox_name if backend == "codex_native" else self.sandbox_name
+        return base_name or f"spectralix-runtime-{uuid.uuid4().hex[:8]}"
+
+    def _sandbox_from_for_backend(self, backend: str) -> str:
+        return self.native_codex_sandbox_from if backend == "codex_native" else self.sandbox_from
 
     def _upload_runtime_sources(self, handle: OpenShellSandboxHandle) -> None:
         self._run_cli(
@@ -325,6 +374,46 @@ class OpenShellManager:
             raise OpenShellManagerError(
                 f"OpenShell bootstrap failed with exit_code={result.exit_code}: {stderr or 'unknown error'}"
             )
+
+    def _bootstrap_codex_home(self, handle: OpenShellSandboxHandle) -> None:
+        auth_source = Path(os.path.expanduser(self.native_codex_upload_auth_from))
+        if not auth_source.exists():
+            raise OpenShellManagerError(
+                f"Native Codex auth file not found: {auth_source}"
+            )
+        prepare = self._client_for_gateway().exec(
+            handle.sandbox_id,
+            [
+                "python3",
+                "-c",
+                (
+                    "from pathlib import Path; "
+                    f"home=Path({self.native_codex_home_dir!r}); "
+                    "home.mkdir(parents=True, exist_ok=True)"
+                ),
+            ],
+            workdir="/sandbox",
+            timeout_seconds=30,
+            env={"PYTHONUNBUFFERED": "1", "PYTHONPATH": "/sandbox"},
+        )
+        if prepare.exit_code != 0:
+            stderr = self._text_output(prepare.stderr).strip()
+            raise OpenShellManagerError(
+                f"OpenShell native Codex home bootstrap failed with exit_code={prepare.exit_code}: {stderr or 'unknown error'}"
+            )
+        self._run_cli(
+            [
+                self.openshell_bin,
+                "sandbox",
+                "upload",
+                "-g",
+                self.gateway_name,
+                handle.sandbox_name,
+                str(auth_source),
+                f"{self.native_codex_home_dir.rstrip('/')}/auth.json",
+            ],
+            timeout_seconds=300,
+        )
 
     def _ensure_runtime_venv(self, handle: OpenShellSandboxHandle) -> None:
         check = self._client_for_gateway().exec(

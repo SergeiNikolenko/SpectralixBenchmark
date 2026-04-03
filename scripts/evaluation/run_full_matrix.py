@@ -244,6 +244,7 @@ def _validate_resume_compatibility(
     model_name: str,
     judge_model: str,
     agent_sandbox: str,
+    agent_backend: Optional[str],
     agent_tools_profile: str,
     agent_config: Path,
 ) -> None:
@@ -259,6 +260,7 @@ def _validate_resume_compatibility(
         "model_name": str(existing_manifest.get("model_name") or ""),
         "judge_model": str(settings.get("judge_model") or ""),
         "agent_sandbox": str(settings.get("agent_sandbox") or ""),
+        "agent_backend": str(settings.get("agent_backend") or ""),
         "agent_tools_profile": str(settings.get("agent_tools_profile") or ""),
         "agent_config": str(settings.get("agent_config") or ""),
     }
@@ -266,6 +268,7 @@ def _validate_resume_compatibility(
         {
             "judge_model": judge_model,
             "agent_sandbox": agent_sandbox,
+            "agent_backend": str(agent_backend or ""),
             "agent_tools_profile": agent_tools_profile,
             "agent_config": str(agent_config),
         }
@@ -609,6 +612,12 @@ def parse_args() -> argparse.Namespace:
         help="Agent executor type (default: openshell)",
     )
     parser.add_argument(
+        "--agent-backend",
+        type=str,
+        default=None,
+        help="Optional runtime backend selector (for example: openshell_worker|codex_native)",
+    )
+    parser.add_argument(
         "--agent-tools-profile",
         type=str,
         default="minimal",
@@ -768,6 +777,7 @@ def main() -> None:
             "limit": args.limit,
             "agent_max_steps": args.agent_max_steps,
             "agent_sandbox": args.agent_sandbox,
+            "agent_backend": args.agent_backend,
             "agent_tools_profile": args.agent_tools_profile,
             "agent_config": str(args.agent_config),
             "judge_max_tokens": args.judge_max_tokens,
@@ -841,6 +851,7 @@ def main() -> None:
                     model_name=model_name,
                     judge_model=args.judge_model,
                     agent_sandbox=args.agent_sandbox,
+                    agent_backend=args.agent_backend,
                     agent_tools_profile=args.agent_tools_profile,
                     agent_config=args.agent_config,
                 )
@@ -863,6 +874,7 @@ def main() -> None:
                 "verbose_output_path": str(verbose_output_path),
                 "settings": {
                     "agent_sandbox": args.agent_sandbox,
+                    "agent_backend": args.agent_backend,
                     "agent_tools_profile": args.agent_tools_profile,
                     "agent_config": str(args.agent_config),
                     "judge_model": args.judge_model,
@@ -890,6 +902,7 @@ def main() -> None:
                     limit=args.limit,
                     agent_max_steps=args.agent_max_steps,
                     agent_sandbox=args.agent_sandbox,
+                    agent_backend=args.agent_backend,
                     agent_tools_profile=args.agent_tools_profile,
                     agent_config=args.agent_config,
                     student_guard_enabled=student_guard_enabled,

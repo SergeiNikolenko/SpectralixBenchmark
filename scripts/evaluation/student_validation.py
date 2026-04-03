@@ -784,6 +784,7 @@ def run_benchmark_inference(
     *,
     agent_max_steps: int = 6,
     agent_sandbox: str = "openshell",
+    agent_backend: Optional[str] = None,
     agent_tools_profile: str = "minimal",
     agent_config: Optional[Path] = Path("scripts/agents/agent_config.yaml"),
     api_key: Optional[str] = None,
@@ -809,6 +810,7 @@ def run_benchmark_inference(
             config_path=agent_config,
             max_steps=agent_max_steps,
             sandbox=agent_sandbox,
+            backend=agent_backend,
             tools_profile=agent_tools_profile,
             timeout_sec=timeout,
         )
@@ -1073,6 +1075,12 @@ if __name__ == "__main__":
         help="Agent executor type (default: openshell)",
     )
     parser.add_argument(
+        "--agent-backend",
+        type=str,
+        default=None,
+        help="Optional runtime backend selector (for example: openshell_worker|codex_native)",
+    )
+    parser.add_argument(
         "--agent-tools-profile",
         type=str,
         default="minimal",
@@ -1161,6 +1169,7 @@ if __name__ == "__main__":
             limit=args.limit,
             agent_max_steps=args.agent_max_steps,
             agent_sandbox=args.agent_sandbox,
+            agent_backend=args.agent_backend,
             agent_tools_profile=args.agent_tools_profile,
             agent_config=args.agent_config,
             student_guard_enabled=args.student_guard_enabled,

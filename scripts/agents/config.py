@@ -19,6 +19,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
         "reasoning_effort": "high",
     },
     "runtime": {
+        "backend": "openshell_worker",
         "add_base_tools": True,
         "use_structured_outputs_internally": True,
         "code_block_tags": "markdown",
@@ -50,6 +51,13 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
             "sandbox_from": "base",
             "ready_timeout_seconds": 180,
             "delete_on_close": False,
+            "native_codex": {
+                "sandbox_name": "spectralix-codex-runtime",
+                "sandbox_from": "codex",
+                "codex_bin": "codex",
+                "codex_home_dir": "/sandbox/.codex",
+                "upload_auth_from": "~/.codex/auth.json",
+            },
         },
     },
     "tools": {
@@ -91,6 +99,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
 
 REQUIRED_CONFIG_SECTIONS = ("model", "runtime", "security", "sandbox", "tools")
 SUPPORTED_EXECUTORS = {"local", "openshell"}
+SUPPORTED_BACKENDS = {"local_worker", "openshell_worker", "codex_native"}
 SUPPORTED_REASONING_EFFORTS = {"low", "medium", "high"}
 
 
@@ -151,11 +160,17 @@ def validate_agent_config(config: Dict[str, Any]) -> Dict[str, Any]:
         _require_mapping(config, section)
 
     model_cfg = _require_mapping(config, "model")
+    runtime_cfg = _require_mapping(config, "runtime")
     reasoning_effort = str(model_cfg.get("reasoning_effort") or "").strip().lower()
     if reasoning_effort and reasoning_effort not in SUPPORTED_REASONING_EFFORTS:
         raise ValueError(
             "Agent config model.reasoning_effort must be one of "
             f"{sorted(SUPPORTED_REASONING_EFFORTS)}"
+        )
+    backend = str(runtime_cfg.get("backend") or "").strip().lower()
+    if backend and backend not in SUPPORTED_BACKENDS:
+        raise ValueError(
+            f"Unsupported runtime backend '{backend}'. Supported: {sorted(SUPPORTED_BACKENDS)}"
         )
 
     sandbox = _require_mapping(config, "sandbox")
@@ -171,6 +186,17 @@ def validate_agent_config(config: Dict[str, Any]) -> Dict[str, Any]:
         openshell_cfg = sandbox.get("openshell")
         if not isinstance(openshell_cfg, dict):
             raise ValueError("Agent config sandbox.openshell must be a mapping for openshell executor")
+        native_codex_cfg = openshell_cfg.get("native_codex", {})
+        if native_codex_cfg and not isinstance(native_codex_cfg, dict):
+            raise ValueError("Agent config sandbox.openshell.native_codex must be a mapping")
+
+    effective_backend = resolve_runtime_backend(config, executor_type=executor_type)
+    if executor_type == "local" and effective_backend != "local_worker":
+        raise ValueError("Local executor supports only runtime.backend=local_worker")
+    if executor_type == "openshell" and effective_backend not in {"openshell_worker", "codex_native"}:
+        raise ValueError(
+            "OpenShell executor supports only runtime.backend in {'openshell_worker', 'codex_native'}"
+        )
 
     security = _require_mapping(config, "security")
     allowed_hosts = security.get("allowed_tool_hosts", [])
@@ -235,4 +261,25 @@ def build_executor_kwargs(config: Dict[str, Any], workspace_dir: Path) -> Dict[s
         "sandbox_from": str(openshell_cfg.get("sandbox_from") or "base"),
         "ready_timeout_seconds": float(openshell_cfg.get("ready_timeout_seconds") or 180),
         "delete_on_close": bool(openshell_cfg.get("delete_on_close", False)),
+        "native_codex": deepcopy(openshell_cfg.get("native_codex") or {}),
     }
+
+
+def resolve_runtime_backend(
+    config: Dict[str, Any],
+    *,
+    executor_type: str,
+    requested_backend: Optional[str] = None,
+) -> str:
+    normalized_executor = str(executor_type or "").strip().lower()
+    normalized_requested = str(requested_backend or "").strip().lower()
+    if normalized_executor == "local" and not normalized_requested:
+        return "local_worker"
+    if normalized_requested:
+        return normalized_requested
+    configured = str(((config.get("runtime") or {}).get("backend") or "")).strip().lower()
+    if normalized_executor == "local":
+        return "local_worker"
+    if configured:
+        return configured
+    return "openshell_worker"
