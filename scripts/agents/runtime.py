@@ -166,18 +166,21 @@ class AgentRuntime:
         try:
             self._last_run_details = None
             self.preflight()
+            worker_timeout = self._payload_timeout_seconds(payload)
+            payload = dict(payload)
+            payload["timeout_sec"] = worker_timeout
             if self.executor_type == "local":
-                result = self._run_local_worker(payload)
+                result = self._run_local_worker(payload, timeout_seconds=worker_timeout)
             else:
                 if self._openshell_manager is None:
                     raise AgentRuntimeError(status="sandbox_error", message="OpenShell manager not initialized")
                 if self.runtime_backend == "codex_native":
                     result = self._openshell_manager.exec_codex_worker(
                         payload=payload,
-                        timeout_seconds=self.timeout_sec,
+                        timeout_seconds=worker_timeout,
                     )
                 else:
-                    result = self._openshell_manager.exec_worker(payload=payload, timeout_seconds=self.timeout_sec)
+                    result = self._openshell_manager.exec_worker(payload=payload, timeout_seconds=worker_timeout)
             self._last_run_details = result
             if str(result.get("state") or "").strip().lower() != "success":
                 message = str(result.get("error") or result.get("output") or "agent worker returned error state").strip()
@@ -190,14 +193,14 @@ class AgentRuntime:
             self.logger.exception("Agent runtime task failed with status=%s", status)
             raise AgentRuntimeError(status=status, message=str(exc)[:240]) from exc
 
-    def _run_local_worker(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _run_local_worker(self, payload: Dict[str, Any], *, timeout_seconds: int) -> Dict[str, Any]:
         process = subprocess.run(
             [sys.executable, "-m", "scripts.agents.openshell_worker"],
             cwd=str(self.workspace_dir),
             input=json.dumps(payload, ensure_ascii=False),
             capture_output=True,
             text=True,
-            timeout=self.timeout_sec,
+            timeout=timeout_seconds,
             check=False,
         )
         if process.returncode != 0:
@@ -229,7 +232,7 @@ class AgentRuntime:
     @staticmethod
     def _classify_error(error: Exception) -> str:
         text = str(error).lower()
-        if "timeout" in text or "timed out" in text:
+        if "timeout" in text or "timed out" in text or "exit_code=124" in text:
             return "timeout"
         if (
             "429" in text
@@ -250,3 +253,22 @@ class AgentRuntime:
         if "connection" in text or "network" in text:
             return "http_error"
         return "parse_error"
+
+    def _payload_timeout_seconds(self, payload: Dict[str, Any]) -> int:
+        timeout = self.timeout_sec
+        mode = str(payload.get("mode") or "").strip().lower()
+        if mode != "student":
+            return timeout
+
+        question = payload.get("question") or {}
+        level = str(question.get("level") or "").strip().upper()
+        answer_type = str(question.get("answer_type") or "").strip().lower()
+        task_subtype = str(question.get("task_subtype") or "").strip().lower()
+
+        if level == "C" or answer_type == "full_synthesis":
+            return max(timeout, 240)
+        if level == "B" and (
+            answer_type == "text" or "disconnection" in task_subtype or "precursor" in task_subtype
+        ):
+            return max(timeout, 180)
+        return timeout

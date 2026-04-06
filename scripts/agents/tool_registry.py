@@ -9,6 +9,7 @@ import re
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 import os
+import shlex
 
 
 def _normalize_answer_type(answer_type: str) -> str:
@@ -248,6 +249,266 @@ def chem_python_tool(code: str, timeout_sec: int = 20) -> str:
     )
 
 
+def _workspace_root() -> Path:
+    return Path(os.getenv("AGENT_WORKSPACE_ROOT") or "/sandbox/workspace").resolve()
+
+
+def _resolve_workspace_path(raw_path: str) -> Path:
+    root = _workspace_root()
+    candidate = (raw_path or "").strip()
+    if not candidate:
+        return root
+    resolved = (root / candidate).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"path_outside_workspace:{candidate}") from exc
+    return resolved
+
+
+def workspace_list_tool(path: str = ".", max_entries: int = 200) -> str:
+    """
+    List files and directories under the uploaded workspace snapshot.
+
+    Args:
+        path: Relative path under the workspace root.
+        max_entries: Maximum number of entries to return.
+    """
+    try:
+        target = _resolve_workspace_path(path)
+    except Exception as exc:
+        return json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False)
+
+    if not target.exists():
+        return json.dumps({"status": "error", "reason": "not_found"}, ensure_ascii=False)
+    if not target.is_dir():
+        return json.dumps({"status": "error", "reason": "not_directory"}, ensure_ascii=False)
+
+    entries: List[Dict[str, Any]] = []
+    limit = max(1, min(int(max_entries), 500))
+    root = _workspace_root()
+    for item in sorted(target.iterdir(), key=lambda value: (not value.is_dir(), value.name.lower()))[:limit]:
+        relative = str(item.relative_to(root))
+        try:
+            size = item.stat().st_size
+        except OSError:
+            size = None
+        entries.append(
+            {
+                "path": relative,
+                "type": "dir" if item.is_dir() else "file",
+                "size": size,
+            }
+        )
+
+    return json.dumps({"status": "ok", "entries": entries}, ensure_ascii=False)
+
+
+def workspace_read_tool(path: str, max_bytes: int = 12000) -> str:
+    """
+    Read a UTF-8 text file from the uploaded workspace snapshot.
+
+    Args:
+        path: Relative path under the workspace root.
+        max_bytes: Maximum number of bytes to read from the file.
+    """
+    try:
+        target = _resolve_workspace_path(path)
+    except Exception as exc:
+        return json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False)
+
+    if not target.exists():
+        return json.dumps({"status": "error", "reason": "not_found"}, ensure_ascii=False)
+    if not target.is_file():
+        return json.dumps({"status": "error", "reason": "not_file"}, ensure_ascii=False)
+
+    payload = target.read_text(encoding="utf-8", errors="replace")
+    clipped = payload[: max(1, int(max_bytes))]
+    return json.dumps(
+        {
+            "status": "ok",
+            "path": str(target.relative_to(_workspace_root())),
+            "content": clipped,
+            "truncated": len(clipped) < len(payload),
+        },
+        ensure_ascii=False,
+    )
+
+
+def workspace_write_tool(path: str, content: str, mode: str = "overwrite") -> str:
+    """
+    Write a UTF-8 text file under the uploaded workspace snapshot.
+
+    Args:
+        path: Relative path under the workspace root.
+        content: File content to write.
+        mode: Either 'overwrite' or 'append'.
+    """
+    try:
+        target = _resolve_workspace_path(path)
+    except Exception as exc:
+        return json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False)
+
+    write_mode = (mode or "overwrite").strip().lower()
+    if write_mode not in {"overwrite", "append"}:
+        return json.dumps({"status": "error", "reason": "invalid_mode"}, ensure_ascii=False)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if write_mode == "append":
+        with target.open("a", encoding="utf-8") as handle:
+            handle.write(content or "")
+    else:
+        target.write_text(content or "", encoding="utf-8")
+
+    return json.dumps(
+        {
+            "status": "ok",
+            "path": str(target.relative_to(_workspace_root())),
+            "bytes_written": len((content or "").encode("utf-8")),
+            "mode": write_mode,
+        },
+        ensure_ascii=False,
+    )
+
+
+def shell_exec_tool(command: str, timeout_sec: int = 30, workdir: str = ".") -> str:
+    """
+    Run a short shell command inside the sandbox workspace.
+
+    Args:
+        command: Shell command to execute.
+        timeout_sec: Hard timeout in seconds.
+        workdir: Relative working directory under the workspace root.
+    """
+    snippet = (command or "").strip()
+    if not snippet:
+        return json.dumps({"status": "error", "reason": "empty_command"}, ensure_ascii=False)
+
+    try:
+        cwd = _resolve_workspace_path(workdir)
+    except Exception as exc:
+        return json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False)
+    if not cwd.exists() or not cwd.is_dir():
+        return json.dumps({"status": "error", "reason": "invalid_workdir"}, ensure_ascii=False)
+
+    try:
+        argv = shlex.split(snippet)
+    except ValueError as exc:
+        return json.dumps({"status": "error", "reason": f"invalid_command:{exc}"}, ensure_ascii=False)
+    if not argv:
+        return json.dumps({"status": "error", "reason": "empty_command"}, ensure_ascii=False)
+
+    allowed_commands = {
+        "python",
+        "python3",
+        "/sandbox/.venv/bin/python",
+        "uv",
+        "/sandbox/.venv/bin/uv",
+        "ls",
+        "cat",
+        "find",
+        "rg",
+        "grep",
+        "pwd",
+        "echo",
+        "head",
+        "sed",
+    }
+    executable = argv[0]
+    if executable not in allowed_commands:
+        return json.dumps(
+            {"status": "error", "reason": f"command_not_allowed:{executable}"},
+            ensure_ascii=False,
+        )
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PATH"] = f"/sandbox/.venv/bin:{env.get('PATH', '')}"
+
+    try:
+        proc = subprocess.run(
+            argv,
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=max(1, int(timeout_sec)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return json.dumps({"status": "error", "reason": "timeout"}, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"status": "error", "reason": f"shell_tool_error:{exc}"}, ensure_ascii=False)
+
+    return json.dumps(
+        {
+            "status": "ok" if proc.returncode == 0 else "error",
+            "returncode": proc.returncode,
+            "stdout": (proc.stdout or "").strip()[:12000],
+            "stderr": (proc.stderr or "").strip()[:12000],
+            "cwd": str(cwd.relative_to(_workspace_root())),
+            "argv": argv,
+        },
+        ensure_ascii=False,
+    )
+
+
+def uv_run_tool(args: str, timeout_sec: int = 60, workdir: str = ".") -> str:
+    """
+    Run uv inside the sandbox workspace using the runtime virtual environment.
+
+    Args:
+        args: Arguments passed to uv, for example 'run python script.py'.
+        timeout_sec: Hard timeout in seconds.
+        workdir: Relative working directory under the workspace root.
+    """
+    raw_args = (args or "").strip()
+    if not raw_args:
+        return json.dumps({"status": "error", "reason": "empty_args"}, ensure_ascii=False)
+
+    try:
+        cwd = _resolve_workspace_path(workdir)
+    except Exception as exc:
+        return json.dumps({"status": "error", "reason": str(exc)}, ensure_ascii=False)
+    if not cwd.exists() or not cwd.is_dir():
+        return json.dumps({"status": "error", "reason": "invalid_workdir"}, ensure_ascii=False)
+
+    uv_bin = os.getenv("AGENT_UV_BIN") or "/sandbox/.venv/bin/uv"
+    if not Path(uv_bin).exists():
+        return json.dumps({"status": "error", "reason": "uv_not_available"}, ensure_ascii=False)
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PATH"] = f"/sandbox/.venv/bin:{env.get('PATH', '')}"
+
+    try:
+        proc = subprocess.run(
+            [uv_bin, *shlex.split(raw_args)],
+            cwd=str(cwd),
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=max(1, int(timeout_sec)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return json.dumps({"status": "error", "reason": "timeout"}, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"status": "error", "reason": f"uv_tool_error:{exc}"}, ensure_ascii=False)
+
+    return json.dumps(
+        {
+            "status": "ok" if proc.returncode == 0 else "error",
+            "returncode": proc.returncode,
+            "stdout": (proc.stdout or "").strip()[:12000],
+            "stderr": (proc.stderr or "").strip()[:12000],
+            "cwd": str(cwd.relative_to(_workspace_root())),
+            "argv": [uv_bin, *shlex.split(raw_args)],
+        },
+        ensure_ascii=False,
+    )
+
+
 def safe_http_get_tool(url: str, timeout_sec: int = 10) -> str:
     """
     Fetches a trusted URL only if host is allowlisted in AGENT_ALLOWED_HOSTS.
@@ -378,6 +639,69 @@ TOOL_DEFINITIONS: Dict[str, ToolDefinition] = {
                 "timeout_sec": {"type": "integer", "minimum": 1},
             },
             required=["code"],
+        ),
+    ),
+    "workspace_list_tool": ToolDefinition(
+        name="workspace_list_tool",
+        func=workspace_list_tool,
+        description="List files and directories in the uploaded workspace snapshot.",
+        schema=_object_schema(
+            properties={
+                "path": {"type": "string"},
+                "max_entries": {"type": "integer", "minimum": 1},
+            },
+            required=[],
+        ),
+    ),
+    "workspace_read_tool": ToolDefinition(
+        name="workspace_read_tool",
+        func=workspace_read_tool,
+        description="Read a UTF-8 text file from the uploaded workspace snapshot.",
+        schema=_object_schema(
+            properties={
+                "path": {"type": "string"},
+                "max_bytes": {"type": "integer", "minimum": 1},
+            },
+            required=["path"],
+        ),
+    ),
+    "workspace_write_tool": ToolDefinition(
+        name="workspace_write_tool",
+        func=workspace_write_tool,
+        description="Write or append a UTF-8 text file inside the uploaded workspace snapshot.",
+        schema=_object_schema(
+            properties={
+                "path": {"type": "string"},
+                "content": {"type": "string"},
+                "mode": {"type": "string", "enum": ["overwrite", "append"]},
+            },
+            required=["path", "content"],
+        ),
+    ),
+    "shell_exec_tool": ToolDefinition(
+        name="shell_exec_tool",
+        func=shell_exec_tool,
+        description="Run a short shell command inside the sandbox workspace and capture stdout and stderr.",
+        schema=_object_schema(
+            properties={
+                "command": {"type": "string"},
+                "timeout_sec": {"type": "integer", "minimum": 1},
+                "workdir": {"type": "string"},
+            },
+            required=["command"],
+        ),
+    ),
+    "uv_run_tool": ToolDefinition(
+        name="uv_run_tool",
+        func=uv_run_tool,
+        description="Run uv inside the sandbox workspace using the runtime virtual environment.",
+        schema=_object_schema(
+            properties={
+                "args": {"type": "string"},
+                "timeout_sec": {"type": "integer", "minimum": 1},
+                "workdir": {"type": "string"},
+            },
+            required=["args"],
         ),
     ),
     "safe_http_get_tool": ToolDefinition(

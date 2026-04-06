@@ -71,6 +71,10 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
                 "rubric_hint_tool",
                 "json_array_validate_tool",
                 "chem_python_tool",
+                "workspace_list_tool",
+                "workspace_read_tool",
+                "shell_exec_tool",
+                "uv_run_tool",
             ],
             "tools_internet": [
                 "chem_format_tool",
@@ -79,6 +83,10 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
                 "rubric_hint_tool",
                 "json_array_validate_tool",
                 "chem_python_tool",
+                "workspace_list_tool",
+                "workspace_read_tool",
+                "shell_exec_tool",
+                "uv_run_tool",
                 "safe_http_get_tool",
             ],
             "full": [
@@ -88,6 +96,11 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
                 "rubric_hint_tool",
                 "json_array_validate_tool",
                 "chem_python_tool",
+                "workspace_list_tool",
+                "workspace_read_tool",
+                "workspace_write_tool",
+                "shell_exec_tool",
+                "uv_run_tool",
             ],
         },
         "mcp": {

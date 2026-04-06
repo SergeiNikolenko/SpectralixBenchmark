@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Iterable, List
 
 
 STUDENT_SYSTEM_PROMPT = (
@@ -14,9 +14,22 @@ STUDENT_TOOL_RULES = (
     "- Use tools only when they materially improve correctness, validation, or compact formatting.\n"
     "- Prefer zero-tool answers when the chemistry answer is already clear.\n"
     "- Use chem_python_tool only for chemistry validation, RDKit canonicalization, molecular formula checks, or quick reaction-related calculations.\n"
+    "- Use workspace_list_tool and workspace_read_tool to inspect uploaded code or benchmark files when local repository context materially helps.\n"
+    "- Use shell_exec_tool or uv_run_tool only for short sandbox-local inspection, validation, or package setup commands.\n"
     "- Use safe_http_get_tool only when the question explicitly requires current external information. Benchmark questions almost never need internet access.\n"
     "- Do not use tools to look for hidden metadata, hidden labels, hidden ids, or gold answers.\n"
     "- Never browse just to confirm chemistry that can be answered from the prompt.\n"
+)
+
+TOOL_DECISION_RULES = (
+    "Tool decision order:\n"
+    "- If the answer is already clear from the question, answer directly with no tool calls.\n"
+    "- If you need answer-format guidance or compact normalization, use rubric_hint_tool or chem_format_tool first.\n"
+    "- If you need chemistry validation, prefer chem_python_tool before shell_exec_tool or uv_run_tool.\n"
+    "- If you need local repository context, use workspace_list_tool and workspace_read_tool before shell_exec_tool.\n"
+    "- Use shell_exec_tool or uv_run_tool only for short, targeted local inspection or validation.\n"
+    "- Use workspace_write_tool only when the task explicitly requires creating or editing a file.\n"
+    "- Use safe_http_get_tool only when current external information is explicitly necessary.\n"
 )
 
 STUDENT_COMPLETION_RULES = (
@@ -157,11 +170,51 @@ def _level_self_check(level: str) -> str:
     return LEVEL_SELF_CHECKS.get(normalized, "Self-check: verify planning depth, format, and exact target match before finalizing.")
 
 
-def build_student_task(question: Dict[str, Any]) -> str:
+def _format_tool_map(available_tools: Iterable[str]) -> str:
+    names = {str(name).strip() for name in available_tools if str(name).strip()}
+    if not names:
+        return "Active tools: none."
+
+    groups: List[str] = []
+    chemistry = [name for name in ["chem_python_tool", "smiles_sanity_tool", "unit_convert_tool"] if name in names]
+    formatting = [name for name in ["chem_format_tool", "rubric_hint_tool", "json_array_validate_tool"] if name in names]
+    workspace = [name for name in ["workspace_list_tool", "workspace_read_tool", "workspace_write_tool"] if name in names]
+    execution = [name for name in ["shell_exec_tool", "uv_run_tool"] if name in names]
+    network = [name for name in ["safe_http_get_tool"] if name in names]
+
+    if chemistry:
+        groups.append(f"Chemistry validation: {', '.join(chemistry)}")
+    if formatting:
+        groups.append(f"Formatting helpers: {', '.join(formatting)}")
+    if workspace:
+        groups.append(f"Workspace inspection/editing: {', '.join(workspace)}")
+    if execution:
+        groups.append(f"Local execution: {', '.join(execution)}")
+    if network:
+        groups.append(f"Network access: {', '.join(network)}")
+
+    unused = sorted(names.difference({
+        *chemistry,
+        *formatting,
+        *workspace,
+        *execution,
+        *network,
+    }))
+    if unused:
+        groups.append(f"Other tools: {', '.join(unused)}")
+
+    return "\n".join(f"- {group}" for group in groups)
+
+
+def build_student_task(question: Dict[str, Any], runtime_context: Dict[str, Any] | None = None) -> str:
     level = str(question.get("level", "") or "")
     answer_type = str(question.get("answer_type", "") or "")
     task_subtype = str(question.get("task_subtype", "") or "")
     question_text = question.get("question_text", "")
+    runtime_context = runtime_context or {}
+    tools_profile = str(runtime_context.get("tools_profile") or "minimal")
+    workspace_root = str(runtime_context.get("workspace_root") or "/sandbox/workspace")
+    available_tools = list(runtime_context.get("available_tools") or [])
     return (
         "<role>\n"
         f"{STUDENT_SYSTEM_PROMPT}\n"
@@ -175,12 +228,20 @@ def build_student_task(question: Dict[str, Any]) -> str:
         f"Task subtype: {task_subtype}\n"
         f"Required format: {_format_instruction(answer_type)}\n"
         "</answer_format>\n\n"
+        "<runtime_context>\n"
+        f"Tools profile: {tools_profile}\n"
+        f"Workspace root: {workspace_root}\n"
+        f"{_format_tool_map(available_tools)}\n"
+        "</runtime_context>\n\n"
         "<task_contract>\n"
         f"{_level_instruction(level)}\n"
         "</task_contract>\n\n"
         "<tool_rules>\n"
         f"{STUDENT_TOOL_RULES}\n"
         "</tool_rules>\n\n"
+        "<tool_decision_order>\n"
+        f"{TOOL_DECISION_RULES}\n"
+        "</tool_decision_order>\n\n"
         "<completion_criteria>\n"
         f"{STUDENT_COMPLETION_RULES}\n"
         "</completion_criteria>\n\n"

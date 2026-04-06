@@ -134,6 +134,8 @@ def _run_tool_loop(
 
     os.environ["AGENT_ALLOWED_HOSTS"] = ",".join(config.get("security", {}).get("allowed_tool_hosts") or [])
     os.environ["PYTHON_BIN"] = sys.executable
+    os.environ["AGENT_WORKSPACE_ROOT"] = "/sandbox/workspace"
+    os.environ["AGENT_UV_BIN"] = "/sandbox/.venv/bin/uv"
 
     steps: List[Dict[str, Any]] = []
     final_answer = ""
@@ -237,9 +239,16 @@ def _run_tool_loop(
 
 def _student_messages(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     question = payload["question"]
+    config = payload["config"]
+    tool_definitions = build_tool_definitions(str(payload["tools_profile"]), config)
+    runtime_context = {
+        "tools_profile": str(payload["tools_profile"]),
+        "workspace_root": "/sandbox/workspace",
+        "available_tools": [item.name for item in tool_definitions],
+    }
     return [
         {"role": "system", "content": "You are a chemistry benchmark agent operating inside an OpenShell sandbox."},
-        {"role": "user", "content": build_student_task(question)},
+        {"role": "user", "content": build_student_task(question, runtime_context=runtime_context)},
     ]
 
 

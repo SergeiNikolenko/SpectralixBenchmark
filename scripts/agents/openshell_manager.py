@@ -31,6 +31,17 @@ def _slug(value: str) -> str:
 
 
 class OpenShellManager:
+    _WORKSPACE_UPLOAD_ENTRIES = (
+        "AGENTS.md",
+        "README.md",
+        "pyproject.toml",
+        "uv.lock",
+        "benchmark",
+        "docs",
+        "scripts",
+        "tests",
+    )
+
     def __init__(
         self,
         *,
@@ -212,12 +223,16 @@ class OpenShellManager:
             timeout_seconds=timeout_seconds,
             env={"PYTHONUNBUFFERED": "1", "PYTHONPATH": "/sandbox"},
         )
+        stdout = self._text_output(result.stdout).strip()
+        stderr = self._text_output(result.stderr).strip()
         if result.exit_code != 0:
-            stderr = self._text_output(result.stderr).strip()
+            if result.exit_code == 124:
+                raise OpenShellManagerError(
+                    f"OpenShell worker timed out after {timeout_seconds}s: stdout={stdout[:200]} stderr={stderr[:200]}"
+                )
             raise OpenShellManagerError(
                 f"OpenShell worker failed with exit_code={result.exit_code}: {stderr or 'unknown error'}"
             )
-        stdout = self._text_output(result.stdout).strip()
         if not stdout:
             raise OpenShellManagerError("OpenShell worker returned empty stdout")
         return json.loads(stdout)
@@ -239,12 +254,16 @@ class OpenShellManager:
             timeout_seconds=timeout_seconds,
             env={"PYTHONUNBUFFERED": "1", "PYTHONPATH": "/sandbox"},
         )
+        stdout = self._text_output(result.stdout).strip()
+        stderr = self._text_output(result.stderr).strip()
         if result.exit_code != 0:
-            stderr = self._text_output(result.stderr).strip()
+            if result.exit_code == 124:
+                raise OpenShellManagerError(
+                    f"OpenShell native Codex worker timed out after {timeout_seconds}s: stdout={stdout[:200]} stderr={stderr[:200]}"
+                )
             raise OpenShellManagerError(
                 f"OpenShell native Codex worker failed with exit_code={result.exit_code}: {stderr or 'unknown error'}"
             )
-        stdout = self._text_output(result.stdout).strip()
         if not stdout:
             raise OpenShellManagerError("OpenShell native Codex worker returned empty stdout")
         return json.loads(stdout)
@@ -324,10 +343,40 @@ class OpenShellManager:
             ],
             timeout_seconds=300,
         )
+        prepare = self._client_for_gateway().exec(
+            handle.sandbox_id,
+            ["python3", "-c", "from pathlib import Path; Path('/sandbox/workspace').mkdir(parents=True, exist_ok=True)"],
+            workdir="/sandbox",
+            timeout_seconds=30,
+            env={"PYTHONUNBUFFERED": "1", "PYTHONPATH": "/sandbox"},
+        )
+        if prepare.exit_code != 0:
+            stderr = self._text_output(prepare.stderr).strip()
+            raise OpenShellManagerError(
+                f"OpenShell workspace bootstrap failed with exit_code={prepare.exit_code}: {stderr or 'unknown error'}"
+            )
+        for entry in self._WORKSPACE_UPLOAD_ENTRIES:
+            source = self.workspace_dir / entry
+            if not source.exists():
+                continue
+            destination = f"/sandbox/workspace/{entry}"
+            self._run_cli(
+                [
+                    self.openshell_bin,
+                    "sandbox",
+                    "upload",
+                    "-g",
+                    self.gateway_name,
+                    handle.sandbox_name,
+                    str(source),
+                    destination,
+                ],
+                timeout_seconds=300,
+            )
 
     def _bootstrap_runtime_dependencies(self, handle: OpenShellSandboxHandle, *, tools_profile: str) -> None:
         self._ensure_runtime_venv(handle)
-        packages = ["openai>=1.3.0"]
+        packages = ["openai>=1.3.0", "uv>=0.8.0"]
         if tools_profile in {"tools", "tools_internet", "full"}:
             packages.append("rdkit>=2025.9.6")
 
@@ -336,7 +385,7 @@ class OpenShellManager:
             "-c",
             (
                 "import importlib.util; "
-                f"mods={['openai'] + (['rdkit'] if tools_profile in {'tools', 'tools_internet', 'full'} else [])!r}; "
+                f"mods={['openai', 'uv'] + (['rdkit'] if tools_profile in {'tools', 'tools_internet', 'full'} else [])!r}; "
                 "missing=[m for m in mods if importlib.util.find_spec(m) is None]; "
                 "print('\\n'.join(missing))"
             ),
