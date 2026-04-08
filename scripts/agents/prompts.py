@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Iterable, List
 
 
@@ -11,7 +12,7 @@ STUDENT_SYSTEM_PROMPT = (
 
 STUDENT_TOOL_RULES = (
     "Tool rules:\n"
-    "- Use tools only when they materially improve correctness, validation, or compact formatting.\n"
+    "- Use tools only when they materially improve correctness or validation.\n"
     "- Prefer zero-tool answers when the chemistry answer is already clear.\n"
     "- Use chem_python_tool only for chemistry validation, RDKit canonicalization, molecular formula checks, or quick reaction-related calculations.\n"
     "- Use workspace_list_tool and workspace_read_tool to inspect uploaded code or benchmark files when local repository context materially helps.\n"
@@ -24,7 +25,6 @@ STUDENT_TOOL_RULES = (
 TOOL_DECISION_RULES = (
     "Tool decision order:\n"
     "- If the answer is already clear from the question, answer directly with no tool calls.\n"
-    "- If you need answer-format guidance or compact normalization, use rubric_hint_tool or chem_format_tool first.\n"
     "- If you need chemistry validation, prefer chem_python_tool before shell_exec_tool or uv_run_tool.\n"
     "- If you need local repository context, use workspace_list_tool and workspace_read_tool before shell_exec_tool.\n"
     "- Use shell_exec_tool or uv_run_tool only for short, targeted local inspection or validation.\n"
@@ -52,6 +52,20 @@ STUDENT_CODE_AGENT_RULES = (
     '- Good: final_answer("CCO.CN")\n'
     '- Good: final_answer("precursor_a + precursor_b")\n'
     '- Good: final_answer(\'Answer: {"steps":[...]}\')'
+)
+
+STUDENT_SGR_SYSTEM_PROMPT = (
+    "You must build a hidden structured SGR reasoning object before producing the benchmark answer. "
+    "The SGR object is intermediate reasoning only and must stay separate from the final answer."
+)
+
+STUDENT_SGR_COMPLETION_RULES = (
+    "SGR completion rules:\n"
+    "- Return exactly one JSON object and no extra narrative text.\n"
+    "- Fill the schema using only question content and allowed tool outputs.\n"
+    "- Complete the contract_check block before final_answer.\n"
+    "- The final benchmark answer will be generated later in a separate step.\n"
+    "- Do not omit required fields and do not replace structured fields with prose."
 )
 
 PARSER_AGENT_INSTRUCTION = (
@@ -176,16 +190,13 @@ def _format_tool_map(available_tools: Iterable[str]) -> str:
         return "Active tools: none."
 
     groups: List[str] = []
-    chemistry = [name for name in ["chem_python_tool", "smiles_sanity_tool", "unit_convert_tool"] if name in names]
-    formatting = [name for name in ["chem_format_tool", "rubric_hint_tool", "json_array_validate_tool"] if name in names]
+    chemistry = [name for name in ["chem_python_tool"] if name in names]
     workspace = [name for name in ["workspace_list_tool", "workspace_read_tool", "workspace_write_tool"] if name in names]
     execution = [name for name in ["shell_exec_tool", "uv_run_tool"] if name in names]
     network = [name for name in ["safe_http_get_tool"] if name in names]
 
     if chemistry:
         groups.append(f"Chemistry validation: {', '.join(chemistry)}")
-    if formatting:
-        groups.append(f"Formatting helpers: {', '.join(formatting)}")
     if workspace:
         groups.append(f"Workspace inspection/editing: {', '.join(workspace)}")
     if execution:
@@ -195,7 +206,6 @@ def _format_tool_map(available_tools: Iterable[str]) -> str:
 
     unused = sorted(names.difference({
         *chemistry,
-        *formatting,
         *workspace,
         *execution,
         *network,
@@ -206,15 +216,96 @@ def _format_tool_map(available_tools: Iterable[str]) -> str:
     return "\n".join(f"- {group}" for group in groups)
 
 
-def build_student_task(question: Dict[str, Any], runtime_context: Dict[str, Any] | None = None) -> str:
-    level = str(question.get("level", "") or "")
-    answer_type = str(question.get("answer_type", "") or "")
-    task_subtype = str(question.get("task_subtype", "") or "")
-    question_text = question.get("question_text", "")
+def _format_sgr_context(sgr_context: Dict[str, Any] | None) -> str:
+    if not isinstance(sgr_context, dict) or not sgr_context:
+        return ""
+    return json.dumps(sgr_context, ensure_ascii=False, indent=2)
+
+
+def _extract_prompt_context(
+    question: Dict[str, Any],
+    runtime_context: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    context = runtime_context or {}
+    return {
+        "level": str(question.get("level", "") or ""),
+        "answer_type": str(question.get("answer_type", "") or ""),
+        "task_subtype": str(question.get("task_subtype", "") or ""),
+        "question_text": question.get("question_text", ""),
+        "tools_profile": str(context.get("tools_profile") or "minimal"),
+        "workspace_root": str(context.get("workspace_root") or "/sandbox/workspace"),
+        "available_tools": list(context.get("available_tools") or []),
+    }
+
+
+def build_student_sgr_task(
+    question: Dict[str, Any],
+    runtime_context: Dict[str, Any] | None = None,
+    schema_spec: Any | None = None,
+) -> str:
+    prompt_context = _extract_prompt_context(question, runtime_context)
     runtime_context = runtime_context or {}
-    tools_profile = str(runtime_context.get("tools_profile") or "minimal")
-    workspace_root = str(runtime_context.get("workspace_root") or "/sandbox/workspace")
-    available_tools = list(runtime_context.get("available_tools") or [])
+    schema_name = str(getattr(schema_spec, "schema_name", "") or runtime_context.get("sgr_schema_name") or "sgr_schema")
+    schema_template = getattr(schema_spec, "template", None) or {}
+    schema_lines = runtime_context.get("sgr_schema_lines") or ""
+    if not schema_lines and schema_template:
+        schema_lines = json.dumps(schema_template, ensure_ascii=False, indent=2)
+    return (
+        "<role>\n"
+        f"{STUDENT_SGR_SYSTEM_PROMPT}\n"
+        "</role>\n\n"
+        "<task>\n"
+        "Produce the hidden SGR reasoning object for this chemistry benchmark question.\n"
+        "</task>\n\n"
+        "<answer_format>\n"
+        f"Benchmark level: {prompt_context['level']}\n"
+        f"Answer type: {prompt_context['answer_type']}\n"
+        f"Task subtype: {prompt_context['task_subtype']}\n"
+        f"Schema name: {schema_name}\n"
+        "Return exactly one JSON object.\n"
+        "</answer_format>\n\n"
+        "<runtime_context>\n"
+        f"Tools profile: {prompt_context['tools_profile']}\n"
+        f"Workspace root: {prompt_context['workspace_root']}\n"
+        f"{_format_tool_map(prompt_context['available_tools'])}\n"
+        "</runtime_context>\n\n"
+        "<task_contract>\n"
+        f"{_level_instruction(prompt_context['level'])}\n"
+        "</task_contract>\n\n"
+        "<tool_rules>\n"
+        f"{STUDENT_TOOL_RULES}\n"
+        "</tool_rules>\n\n"
+        "<tool_decision_order>\n"
+        f"{TOOL_DECISION_RULES}\n"
+        "</tool_decision_order>\n\n"
+        "<sgr_completion_criteria>\n"
+        f"{STUDENT_SGR_COMPLETION_RULES}\n"
+        "</sgr_completion_criteria>\n\n"
+        "<sgr_schema>\n"
+        f"{schema_lines or '{}'}\n"
+        "</sgr_schema>\n\n"
+        "<question>\n"
+        f"{prompt_context['question_text']}\n"
+        "</question>"
+    )
+
+
+def build_student_task(
+    question: Dict[str, Any],
+    runtime_context: Dict[str, Any] | None = None,
+    sgr_context: Dict[str, Any] | None = None,
+) -> str:
+    prompt_context = _extract_prompt_context(question, runtime_context)
+    sgr_context_text = _format_sgr_context(sgr_context)
+    sgr_block = (
+        "<validated_sgr_context>\n"
+        f"{sgr_context_text}\n"
+        "Use this validated SGR context as hidden reasoning guidance only. "
+        "Do not print the schema or hidden fields in the final answer.\n"
+        "</validated_sgr_context>\n\n"
+        if sgr_context_text
+        else ""
+    )
     return (
         "<role>\n"
         f"{STUDENT_SYSTEM_PROMPT}\n"
@@ -223,18 +314,19 @@ def build_student_task(question: Dict[str, Any], runtime_context: Dict[str, Any]
         "Produce the best final answer for the chemistry question.\n"
         "</task>\n\n"
         "<answer_format>\n"
-        f"Benchmark level: {level}\n"
-        f"Answer type: {answer_type}\n"
-        f"Task subtype: {task_subtype}\n"
-        f"Required format: {_format_instruction(answer_type)}\n"
+        f"Benchmark level: {prompt_context['level']}\n"
+        f"Answer type: {prompt_context['answer_type']}\n"
+        f"Task subtype: {prompt_context['task_subtype']}\n"
+        f"Required format: {_format_instruction(prompt_context['answer_type'])}\n"
         "</answer_format>\n\n"
         "<runtime_context>\n"
-        f"Tools profile: {tools_profile}\n"
-        f"Workspace root: {workspace_root}\n"
-        f"{_format_tool_map(available_tools)}\n"
+        f"Tools profile: {prompt_context['tools_profile']}\n"
+        f"Workspace root: {prompt_context['workspace_root']}\n"
+        f"{_format_tool_map(prompt_context['available_tools'])}\n"
         "</runtime_context>\n\n"
+        f"{sgr_block}"
         "<task_contract>\n"
-        f"{_level_instruction(level)}\n"
+        f"{_level_instruction(prompt_context['level'])}\n"
         "</task_contract>\n\n"
         "<tool_rules>\n"
         f"{STUDENT_TOOL_RULES}\n"
@@ -246,13 +338,13 @@ def build_student_task(question: Dict[str, Any], runtime_context: Dict[str, Any]
         f"{STUDENT_COMPLETION_RULES}\n"
         "</completion_criteria>\n\n"
         "<pre_final_self_check>\n"
-        f"{_level_self_check(level)}\n"
+        f"{_level_self_check(prompt_context['level'])}\n"
         "</pre_final_self_check>\n\n"
         "<code_agent_rules>\n"
         f"{STUDENT_CODE_AGENT_RULES}\n"
         "</code_agent_rules>\n\n"
         "<question>\n"
-        f"{question_text}\n"
+        f"{prompt_context['question_text']}\n"
         "</question>"
     )
 

@@ -299,6 +299,49 @@ def _extract_student_token_totals(agent_run_details: Optional[Dict[str, Any]]) -
     return totals
 
 
+def _compact_sgr_payload(payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+
+    final_answer_value = ""
+    final_answer = payload.get("final_answer")
+    if isinstance(final_answer, dict):
+        final_answer_value = str(final_answer.get("value") or "").strip()
+    elif final_answer is not None:
+        final_answer_value = str(final_answer).strip()
+
+    contract_check = payload.get("contract_check")
+    compact: Dict[str, Any] = {
+        "level": payload.get("level"),
+        "task_subtype": payload.get("task_subtype"),
+        "contract_check": contract_check if isinstance(contract_check, dict) else None,
+        "final_answer": {"value": _truncate_text(final_answer_value, limit=240)} if final_answer_value else None,
+    }
+    return compact
+
+
+def _extract_sgr_from_compact_run_details(
+    compact_run_details: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if not isinstance(compact_run_details, dict):
+        return {
+            "sgr_schema_name": "",
+            "sgr_validation_status": "",
+            "sgr_repair_attempted": False,
+            "sgr_fallback_used": False,
+            "sgr_payload": {},
+        }
+
+    payload = compact_run_details.get("sgr_payload")
+    return {
+        "sgr_schema_name": str(compact_run_details.get("sgr_schema_name") or ""),
+        "sgr_validation_status": str(compact_run_details.get("sgr_validation_status") or ""),
+        "sgr_repair_attempted": bool(compact_run_details.get("sgr_repair_attempted", False)),
+        "sgr_fallback_used": bool(compact_run_details.get("sgr_fallback_used", False)),
+        "sgr_payload": payload if isinstance(payload, dict) else {},
+    }
+
+
 def _compact_run_details(agent_run_details: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(agent_run_details, dict):
         return None
@@ -371,9 +414,20 @@ def _compact_run_details(agent_run_details: Optional[Dict[str, Any]]) -> Optiona
                 }
             )
 
+    sgr_schema_name = str(agent_run_details.get("sgr_schema_name") or "").strip()
+    sgr_validation_status = str(agent_run_details.get("sgr_validation_status") or "").strip()
+    sgr_repair_attempted = bool(agent_run_details.get("sgr_repair_attempted", False))
+    sgr_fallback_used = bool(agent_run_details.get("sgr_fallback_used", False))
+    sgr_payload = _compact_sgr_payload(agent_run_details.get("sgr_payload"))
+
     return {
         "state": str(agent_run_details.get("state") or ""),
         "output_preview": _truncate_text(agent_run_details.get("output"), limit=500),
+        "sgr_schema_name": sgr_schema_name,
+        "sgr_validation_status": sgr_validation_status,
+        "sgr_repair_attempted": sgr_repair_attempted,
+        "sgr_fallback_used": sgr_fallback_used,
+        "sgr_payload": sgr_payload,
         "step_count": len(compact_steps),
         "steps": compact_steps,
     }
@@ -503,6 +557,19 @@ def _write_trace_log(
     }
 
     step_summary_text = _render_step_summary(compact_run_details)
+    sgr_meta = _extract_sgr_from_compact_run_details(compact_run_details)
+    sgr_payload = sgr_meta["sgr_payload"]
+    sgr_schema_name = sgr_meta["sgr_schema_name"]
+
+    sgr_contract_check = sgr_payload.get("contract_check") if isinstance(sgr_payload.get("contract_check"), dict) else None
+    sgr_final_answer = sgr_payload.get("final_answer") if isinstance(sgr_payload.get("final_answer"), dict) else None
+    sgr_schema_dump = {
+        "sgr_schema_name": sgr_schema_name,
+        "sgr_validation_status": sgr_meta["sgr_validation_status"],
+        "sgr_repair_attempted": sgr_meta["sgr_repair_attempted"],
+        "sgr_fallback_used": sgr_meta["sgr_fallback_used"],
+        "sgr_snapshot": sgr_payload or None,
+    }
 
     content = (
         "=== TRACE METADATA ===\n"
@@ -513,6 +580,12 @@ def _write_trace_log(
         f"{json.dumps(reasoning_summary, ensure_ascii=False, indent=2) if reasoning_summary else '<empty>'}\n\n"
         "=== STEP SUMMARY ===\n"
         f"{step_summary_text}\n\n"
+        "=== SGR SCHEMA ===\n"
+        f"{json.dumps(sgr_schema_dump, ensure_ascii=False, indent=2)}\n\n"
+        "=== SGR CONTRACT CHECK ===\n"
+        f"{json.dumps(sgr_contract_check, ensure_ascii=False, indent=2) if sgr_contract_check else '<empty>'}\n\n"
+        "=== SGR FINAL ANSWER CANDIDATE ===\n"
+        f"{json.dumps(sgr_final_answer, ensure_ascii=False, indent=2) if sgr_final_answer else '<empty>'}\n\n"
         "=== AGENT RUN DETAILS ===\n"
         f"{json.dumps(compact_run_details, ensure_ascii=False, indent=2) if compact_run_details else '<empty>'}\n\n"
         "=== AGENT STDOUT/STDERR TRACE ===\n"
@@ -966,12 +1039,15 @@ def run_benchmark_inference(
                 completed_keys.add(question_key)
 
                 if verbose_output_enabled and f_verbose is not None:
+                    sgr_meta = _extract_sgr_from_compact_run_details(compact_run_details)
                     verbose_result = {
                         **result,
                         "raw_answer": raw_answer,
                         "reasoning_summary": reasoning_summary,
                         "runtime_metadata": runtime_metadata,
                         "tool_usage_summary": tool_usage_summary,
+                        "sgr_schema_name": sgr_meta["sgr_schema_name"],
+                        "sgr_snapshot": sgr_meta["sgr_payload"] or None,
                         "agent_run_details": compact_run_details,
                         "trace_log_path": str(trace_log_path) if trace_log_path else None,
                     }

@@ -30,6 +30,9 @@ EXPECTED_STUDENT_OUTPUT_KEYS = {
 EXPECTED_TRACE_SECTIONS = (
     "=== REASONING SUMMARY ===",
     "=== STEP SUMMARY ===",
+    "=== SGR SCHEMA ===",
+    "=== SGR CONTRACT CHECK ===",
+    "=== SGR FINAL ANSWER CANDIDATE ===",
     "=== AGENT STDOUT/STDERR TRACE ===",
     "=== AGENT RUN DETAILS ===",
     "=== RAW MODEL ANSWER ===",
@@ -61,7 +64,25 @@ class _FakeAgentRuntime:
         return None
 
     def get_last_run_details(self):
-        return {"state": "success", "steps": []}
+        return {
+            "state": "success",
+            "steps": [],
+            "sgr_schema_name": "sgr.level_a.reaction_center_identification",
+            "sgr_validation_status": "valid",
+            "sgr_repair_attempted": False,
+            "sgr_fallback_used": False,
+            "sgr_payload": {
+                "level": "A",
+                "task_subtype": "reaction_center_identification",
+                "contract_check": {
+                    "answer_matches_requested_task": True,
+                    "answer_matches_requested_depth": True,
+                    "answer_matches_exact_benchmark_contract": True,
+                    "broader_or_alternative_answer_leak": False,
+                },
+                "final_answer": {"value": "A"},
+            },
+        }
 
     def get_runtime_metadata(self):
         return {"executor_type": "local", "sandbox_runtime": "local_worker"}
@@ -169,6 +190,8 @@ class StudentValidationContractTests(unittest.TestCase):
             trace_sample = trace_files[0].read_text(encoding="utf-8")
             for marker in EXPECTED_TRACE_SECTIONS:
                 self.assertIn(marker, trace_sample)
+            self.assertIn("sgr.level_a.reaction_center_identification", trace_sample)
+            self.assertIn("answer_matches_exact_benchmark_contract", trace_sample)
 
     def test_student_verbose_output_file(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -195,6 +218,11 @@ class StudentValidationContractTests(unittest.TestCase):
                 self.assertIn("reasoning_summary", row)
                 self.assertIn("agent_run_details", row)
                 self.assertIn("trace_log_path", row)
+                self.assertIn("sgr_schema_name", row)
+                self.assertIn("sgr_snapshot", row)
+                self.assertEqual(row["sgr_schema_name"], "sgr.level_a.reaction_center_identification")
+                self.assertIsInstance(row["sgr_snapshot"], dict)
+                self.assertIn("contract_check", row["sgr_snapshot"])
 
     def test_student_run_fails_fast_on_model_limit(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

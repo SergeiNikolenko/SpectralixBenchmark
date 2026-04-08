@@ -232,7 +232,7 @@ class AgentRuntime:
     @staticmethod
     def _classify_error(error: Exception) -> str:
         text = str(error).lower()
-        if "timeout" in text or "timed out" in text or "exit_code=124" in text:
+        if "timeout" in text or "timed out" in text or "exit_code=124" in text or "deadline exceeded" in text:
             return "timeout"
         if (
             "429" in text
@@ -266,9 +266,9 @@ class AgentRuntime:
         task_subtype = str(question.get("task_subtype") or "").strip().lower()
 
         if level == "C" or answer_type == "full_synthesis":
-            return max(timeout, 240)
+            return max(timeout, 540)
         if level == "B" and (
             answer_type == "text" or "disconnection" in task_subtype or "precursor" in task_subtype
         ):
-            return max(timeout, 180)
-        return timeout
+            return max(timeout, 360)
+        return max(timeout, 240)

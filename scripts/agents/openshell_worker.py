@@ -10,7 +10,8 @@ from urllib.parse import urlparse
 
 from openai import OpenAI
 
-from .prompts import build_parse_page_task, build_student_task
+from .prompts import build_parse_page_task, build_student_sgr_task, build_student_task
+from .sgr_schemas import compact_sgr_payload, get_sgr_schema_spec, schema_template_lines, validate_sgr_payload
 from .tool_registry import build_tool_definitions
 
 
@@ -121,15 +122,157 @@ def _chat_completion_with_retry(
             time.sleep(float(attempt))
 
 
+def _extract_json_object(raw_text: str) -> Dict[str, Any]:
+    payload = (raw_text or "").strip()
+    if not payload:
+        raise ValueError("empty_json")
+    try:
+        parsed = json.loads(payload)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    import re
+
+    match = re.search(r"\{[\s\S]*\}", payload)
+    if not match:
+        raise ValueError("json_object_not_found")
+    parsed = json.loads(match.group(0))
+    if not isinstance(parsed, dict):
+        raise ValueError("json_is_not_object")
+    return parsed
+
+
+def _build_sgr_repair_task(schema_name: str, schema_lines: str, invalid_payload: str, error_message: str) -> str:
+    return (
+        "Repair the invalid SGR JSON into a valid JSON object.\n"
+        "Return ONLY one valid JSON object, with no markdown fences and no extra text.\n"
+        "Do not omit required fields.\n"
+        f"Schema name: {schema_name}\n"
+        f"Validation error: {error_message}\n"
+        "Invalid payload:\n"
+        f"{invalid_payload}\n\n"
+        "Schema template:\n"
+        f"{schema_lines}"
+    )
+
+
+def _build_runtime_context(payload: Dict[str, Any], tool_definitions: List[Any]) -> Dict[str, Any]:
+    return {
+        "tools_profile": str(payload["tools_profile"]),
+        "workspace_root": "/sandbox/workspace",
+        "available_tools": [item.name for item in tool_definitions],
+    }
+
+
+def _sgr_tool_definitions(question: Dict[str, Any], tool_definitions: List[Any]) -> List[Any]:
+    level = str(question.get("level") or "").strip().upper()
+    if level == "A":
+        allowed = set()
+    elif level == "B":
+        allowed = {"chem_python_tool"}
+    elif level == "C":
+        allowed = {"chem_python_tool", "workspace_list_tool", "workspace_read_tool", "uv_run_tool"}
+    else:
+        allowed = set()
+    return [item for item in tool_definitions if item.name in allowed]
+
+
+def _generate_sgr_payload(
+    *,
+    payload: Dict[str, Any],
+    tool_definitions: List[Any],
+) -> Dict[str, Any]:
+    question = payload.get("question") or {}
+    spec = get_sgr_schema_spec(str(question.get("level") or ""), str(question.get("task_subtype") or ""))
+    sgr_tools = _sgr_tool_definitions(question, tool_definitions)
+    schema_lines = schema_template_lines(spec.template)
+    runtime_context = _build_runtime_context(payload, sgr_tools)
+    runtime_context["sgr_schema_name"] = spec.schema_name
+    runtime_context["sgr_schema_lines"] = schema_lines
+    initial_result = _run_tool_loop(
+        payload=payload,
+        messages=[
+            {"role": "system", "content": "You produce hidden structured chemistry reasoning JSON only."},
+            {"role": "user", "content": build_student_sgr_task(question, runtime_context=runtime_context, schema_spec=spec)},
+        ],
+        tool_definitions=sgr_tools,
+        step_phase="sgr",
+        step_number_offset=0,
+    )
+    initial_steps = list(initial_result.get("steps") or [])
+    try:
+        validated = validate_sgr_payload(
+            str(question.get("level") or ""),
+            str(question.get("task_subtype") or ""),
+            _extract_json_object(str(initial_result.get("output") or "")),
+        )
+        return {
+            "sgr_schema_name": spec.schema_name,
+            "sgr_payload": validated.model_dump(),
+            "sgr_validation_status": "validated",
+            "sgr_repair_attempted": False,
+            "sgr_fallback_used": False,
+            "steps": initial_steps,
+        }
+    except Exception as first_error:
+        repair_result = _run_tool_loop(
+            payload=payload,
+            messages=[
+                {"role": "system", "content": "You repair hidden structured chemistry reasoning JSON only."},
+                {
+                    "role": "user",
+                    "content": _build_sgr_repair_task(
+                        schema_name=spec.schema_name,
+                        schema_lines=schema_lines,
+                        invalid_payload=str(initial_result.get("output") or ""),
+                        error_message=str(first_error),
+                    ),
+                },
+            ],
+            tool_definitions=[],
+            step_phase="sgr_repair",
+            step_number_offset=len(initial_steps),
+        )
+        combined_steps = initial_steps + list(repair_result.get("steps") or [])
+        try:
+            validated = validate_sgr_payload(
+                str(question.get("level") or ""),
+                str(question.get("task_subtype") or ""),
+                _extract_json_object(str(repair_result.get("output") or "")),
+            )
+            return {
+                "sgr_schema_name": spec.schema_name,
+                "sgr_payload": validated.model_dump(),
+                "sgr_validation_status": "validated_after_repair",
+                "sgr_repair_attempted": True,
+                "sgr_fallback_used": False,
+                "steps": combined_steps,
+            }
+        except Exception:
+            return {
+                "sgr_schema_name": spec.schema_name,
+                "sgr_payload": None,
+                "sgr_validation_status": "fallback_after_repair_failure",
+                "sgr_repair_attempted": True,
+                "sgr_fallback_used": True,
+                "steps": combined_steps,
+            }
+
+
 def _run_tool_loop(
     *,
     payload: Dict[str, Any],
     messages: List[Dict[str, Any]],
+    tool_definitions: List[Any] | None = None,
+    step_phase: str = "",
+    step_number_offset: int = 0,
 ) -> Dict[str, Any]:
     model = payload["model"]
     config = payload["config"]
     client = _build_client(model)
-    tool_definitions = build_tool_definitions(str(payload["tools_profile"]), config)
+    tool_definitions = list(tool_definitions) if tool_definitions is not None else build_tool_definitions(str(payload["tools_profile"]), config)
     tool_lookup = {item.name: item for item in tool_definitions}
 
     os.environ["AGENT_ALLOWED_HOSTS"] = ",".join(config.get("security", {}).get("allowed_tool_hosts") or [])
@@ -167,7 +310,8 @@ def _run_tool_loop(
         tool_calls = list(getattr(message, "tool_calls", None) or [])
 
         step_payload: Dict[str, Any] = {
-            "step_number": step_number,
+            "step_number": step_number + step_number_offset,
+            "phase": step_phase or "main",
             "timing": {"duration": duration},
             "model_output_message": {
                 "content": assistant_text,
@@ -237,19 +381,40 @@ def _run_tool_loop(
     }
 
 
-def _student_messages(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _student_messages(payload: Dict[str, Any], tool_definitions: List[Any]) -> List[Dict[str, Any]]:
     question = payload["question"]
-    config = payload["config"]
-    tool_definitions = build_tool_definitions(str(payload["tools_profile"]), config)
-    runtime_context = {
-        "tools_profile": str(payload["tools_profile"]),
-        "workspace_root": "/sandbox/workspace",
-        "available_tools": [item.name for item in tool_definitions],
-    }
+    runtime_context = _build_runtime_context(payload, tool_definitions)
+    sgr_context = payload.get("sgr_context")
     return [
         {"role": "system", "content": "You are a chemistry benchmark agent operating inside an OpenShell sandbox."},
-        {"role": "user", "content": build_student_task(question, runtime_context=runtime_context)},
+        {"role": "user", "content": build_student_task(question, runtime_context=runtime_context, sgr_context=sgr_context if isinstance(sgr_context, dict) else None)},
     ]
+
+
+def _run_student_with_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
+    tool_definitions = build_tool_definitions(str(payload["tools_profile"]), payload["config"])
+    sgr_meta = _generate_sgr_payload(payload=payload, tool_definitions=tool_definitions)
+    student_payload = dict(payload)
+    if isinstance(sgr_meta.get("sgr_payload"), dict):
+        student_payload["sgr_context"] = {
+            "schema_name": str(sgr_meta.get("sgr_schema_name") or ""),
+            "payload": compact_sgr_payload(sgr_meta["sgr_payload"]),
+        }
+    sgr_steps = list(sgr_meta.get("steps") or [])
+    result = _run_tool_loop(
+        payload=student_payload,
+        messages=_student_messages(student_payload, tool_definitions),
+        tool_definitions=tool_definitions,
+        step_phase="final_answer",
+        step_number_offset=len(sgr_steps),
+    )
+    result["steps"] = sgr_steps + list(result.get("steps") or [])
+    result["sgr_schema_name"] = sgr_meta.get("sgr_schema_name")
+    result["sgr_payload"] = sgr_meta.get("sgr_payload")
+    result["sgr_validation_status"] = sgr_meta.get("sgr_validation_status")
+    result["sgr_repair_attempted"] = bool(sgr_meta.get("sgr_repair_attempted"))
+    result["sgr_fallback_used"] = bool(sgr_meta.get("sgr_fallback_used"))
+    return result
 
 
 def _parser_messages(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -285,7 +450,7 @@ def _main() -> int:
     mode = str(payload.get("mode") or "").strip().lower()
 
     if mode == "student":
-        result = _run_tool_loop(payload=payload, messages=_student_messages(payload))
+        result = _run_student_with_sgr(payload)
     elif mode == "parser":
         result = _run_tool_loop(payload=payload, messages=_parser_messages(payload))
     else:
