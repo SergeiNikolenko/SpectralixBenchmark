@@ -266,9 +266,9 @@ class AgentRuntime:
         task_subtype = str(question.get("task_subtype") or "").strip().lower()
 
         if level == "C" or answer_type == "full_synthesis":
-            return max(timeout, 540)
+            return max(timeout, 900)
         if level == "B" and (
             answer_type == "text" or "disconnection" in task_subtype or "precursor" in task_subtype
         ):
-            return max(timeout, 360)
-        return max(timeout, 240)
+            return max(timeout, 600)
+        return max(timeout, 360)

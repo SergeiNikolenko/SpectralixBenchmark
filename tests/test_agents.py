@@ -349,7 +349,7 @@ class WorkspaceToolTests(unittest.TestCase):
                     "question": {"level": "A", "answer_type": "reaction_description"},
                 }
             ),
-            240,
+            360,
         )
         self.assertEqual(
             runtime._payload_timeout_seconds(
@@ -362,7 +362,7 @@ class WorkspaceToolTests(unittest.TestCase):
                     },
                 }
             ),
-            360,
+            600,
         )
         self.assertEqual(
             runtime._payload_timeout_seconds(
@@ -371,7 +371,7 @@ class WorkspaceToolTests(unittest.TestCase):
                     "question": {"level": "C", "answer_type": "full_synthesis"},
                 }
             ),
-            540,
+            900,
         )
         runtime.close()
 

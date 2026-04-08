@@ -302,7 +302,10 @@ class OpenShellManager:
             raise OpenShellManagerError(
                 "OpenShell Python SDK is not installed. Install project dependencies with uv sync."
             ) from exc
-        self._client = SandboxClient.from_active_cluster(cluster=self.gateway_name, timeout=30.0)
+        self._client = SandboxClient.from_active_cluster(
+            cluster=self.gateway_name,
+            timeout=max(self.ready_timeout_seconds, 1200.0),
+        )
         return self._client
 
     def _run_cli(self, command: list[str], *, timeout_seconds: int) -> None:
