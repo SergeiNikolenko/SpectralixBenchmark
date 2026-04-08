@@ -36,6 +36,7 @@ Applies to:
 - `PydanticAI` is a validation/repair layer only (`scripts/pydantic_guard/*`).
 - It must not receive direct shell, arbitrary file-write, or unrestricted network tools.
 - It must run against the same OpenShell-managed model route as the main runtime.
+- Hidden SGR reasoning (`scripts/agents/sgr_schemas.py`) is internal student metadata and must not alter public benchmark output contracts.
 
 6. MCP policy
 - MCP is disabled by default.
@@ -61,9 +62,14 @@ uv run python -m scripts.evaluation.student_validation \
   --model-name "gpt-5.4-mini" \
   --api-key "ccs-internal-managed" \
   --agent-sandbox openshell \
-  --agent-tools-profile minimal \
+  --agent-backend openshell_worker \
+  --agent-tools-profile tools \
   --limit 3
 ```
+
+Timeout note:
+
+- `--timeout` is a base value. Runtime raises effective student limits by level (`A>=360s`, `B>=600s`, `C/full_synthesis>=900s`) and uses a long OpenShell client timeout (`>=1200s`).
 
 ## Security Regression Scenarios
 

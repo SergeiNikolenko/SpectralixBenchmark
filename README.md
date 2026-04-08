@@ -19,9 +19,17 @@ Primary runtime/config files:
 - `scripts/agents/runtime.py`
 - `scripts/agents/openshell_manager.py`
 - `scripts/agents/openshell_worker.py`
+- `scripts/agents/sgr_schemas.py`
 - `scripts/agents/tool_registry.py`
 - `scripts/agents/agent_config.yaml`
 - `scripts/pydantic_guard/*`
+
+Student inference uses a hidden two-phase flow:
+
+1. Build and validate an internal SGR schema object (`A/B/C` + subtype-specific variants).
+2. Generate the final benchmark-aligned answer using compact validated SGR context.
+
+This keeps `student_output.jsonl` unchanged while making reasoning structure explicit in traces and verbose artifacts.
 
 ## Benchmark Schema
 
@@ -119,14 +127,15 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --api-base-url "$API_BASE_URL" \
   --api-key "$CLIPROXY_API_KEY" \
   --models gpt-5.4-mini \
-  --judge-model gpt-5.4 \
+  --judge-model gpt-5.4-mini \
   --judge-model-url "$API_BASE_URL" \
   --judge-api-key "$CLIPROXY_API_KEY" \
   --judge-method g_eval \
   --judge-g-eval-fallback-structured true \
   --judge-reasoning-effort medium \
   --agent-sandbox openshell \
-  --agent-tools-profile minimal \
+  --agent-backend openshell_worker \
+  --agent-tools-profile tools \
   --trace-log-enabled true
 ```
 
@@ -146,10 +155,11 @@ uv run python -m scripts.evaluation.student_validation \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --output-path scripts/evaluation/student_output.jsonl \
   --api-base-url "$API_BASE_URL" \
-  --model-name "gpt-5-codex-mini" \
+  --model-name "gpt-5.4-mini" \
   --api-key "$CLIPROXY_API_KEY" \
   --agent-sandbox openshell \
-  --agent-tools-profile minimal \
+  --agent-backend openshell_worker \
+  --agent-tools-profile tools \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
@@ -163,7 +173,7 @@ uv run python -m scripts.evaluation.student_validation \
 uv run python -m scripts.evaluation.llm_judge \
   --input-path scripts/evaluation/student_output.jsonl \
   --gold-path benchmark/benchmark_v3_eval.jsonl \
-  --judge-model "gpt-5-codex-mini" \
+  --judge-model "gpt-5.4-mini" \
   --judge-model-url "$API_BASE_URL" \
   --judge-api-key "$CLIPROXY_API_KEY" \
   --judge-method g_eval \
@@ -180,10 +190,11 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --api-base-url "$API_BASE_URL" \
   --api-key "$CLIPROXY_API_KEY" \
-  --models gpt-5-codex-mini \
-  --judge-model gpt-5-codex-mini \
+  --models gpt-5.4-mini \
+  --judge-model gpt-5.4-mini \
   --agent-sandbox openshell \
-  --agent-tools-profile minimal \
+  --agent-backend openshell_worker \
+  --agent-tools-profile tools \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
   --student-guard-retries 2 \
@@ -209,7 +220,7 @@ Run parsing commands from `scripts/parsing`.
 Run parser:
 
 ```bash
-cd /Users/nikolenko/.codex/worktrees/e20d/SpectralixBenchmark/scripts/parsing
+cd scripts/parsing
 
 uv run python exam-parser-pipeline.py \
   --agent-enabled true \
@@ -234,6 +245,13 @@ Default policy in `scripts/agents/agent_config.yaml`:
 
 - OpenShell sandbox is the default executor (`sandbox.executor_type: openshell`)
 - Local helper tools are selected by profile (`no_tools`, `minimal`, `tools`, `tools_internet`)
+- Current production profile is usually `tools` with:
+  - `chem_python_tool`
+  - `workspace_list_tool`
+  - `workspace_read_tool`
+  - `shell_exec_tool`
+  - `uv_run_tool`
+- `workspace_write_tool` is reserved for `full` profile
 - Internet tools are disabled (`security.allow_network_tools: false`)
 - `safe_http_get_tool` is not available unless network tools are explicitly enabled
 - Tool network access is host-allowlisted only (`security.allowed_tool_hosts`)
@@ -242,6 +260,16 @@ Default policy in `scripts/agents/agent_config.yaml`:
 - Student prompt excludes benchmark identifiers (`exam_id/page_id/question_id`)
 
 This means internet access is controlled, not unrestricted.
+
+## Effective Timeout Behavior
+
+`--timeout` is the base timeout. Runtime applies level-aware minimum floors for student calls:
+
+- Level A (or non-B/C student tasks): `>= 360s`
+- Level B text/precursor/disconnection tasks: `>= 600s`
+- Level C or `full_synthesis`: `>= 900s`
+
+OpenShell SDK client timeout is also raised to at least `1200s` to avoid premature gRPC deadline termination on long-running calls.
 
 ## Sandbox Modes
 

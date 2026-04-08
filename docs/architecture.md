@@ -45,23 +45,51 @@
   - Security-aware tool enablement (allowlist, network-tool gating)
 
 - `prompts.py`
-  - Student and parser task prompt builders
+  - Student/parser task prompt builders
+  - Hidden SGR prompt builder for structured reasoning phase
 
 - `runtime.py`
   - `AgentRuntime` orchestration
   - One-time OpenShell sandbox preflight before execution
   - Local or OpenShell worker execution
   - Runtime error normalization
+  - Effective timeout scaling by benchmark level/subtype
 
 - `openshell_manager.py`
   - Gateway health checks
   - Provider + `inference.local` route configuration
   - Sandbox lifecycle management
   - Worker execution inside the sandbox
+  - Long client timeout configuration for extended benchmark calls
 
 - `openshell_worker.py`
+  - Two-phase student flow:
+    - Hidden SGR schema generation and validation
+    - Final benchmark answer generation from compact validated SGR context
   - OpenAI-compatible chat loop inside the sandbox against `https://inference.local/v1`
   - Tool invocation and step capture
+
+- `sgr_schemas.py`
+  - Level A/B/C generic schemas and subtype-specific schema variants
+  - `level/task_subtype -> schema` selector
+  - Schema validation and compact SGR snapshot helpers
+
+## Hidden SGR Student Flow
+
+Student mode uses a real schema-level reasoning stage, not prompt-only guidance:
+
+1. Select schema from benchmark `level` + `task_subtype`.
+2. Generate hidden SGR JSON.
+3. Validate against the selected Pydantic schema.
+4. Attempt one repair pass if validation fails.
+5. Fall back to direct final-answer path only when repair also fails.
+6. Generate final benchmark-aligned answer using compact validated SGR context.
+
+Public benchmark outputs stay unchanged:
+
+- `student_output.jsonl` schema unchanged
+- Judge interfaces unchanged
+- SGR metadata is exposed only in debug/verbose artifacts
 
 ## Guard Layer (`scripts/pydantic_guard/`)
 
@@ -104,14 +132,25 @@ Student stage status values include:
 
 - `ok`
 - `timeout`
-- `connection_error`
 - `http_error`
 - `auth_error`
 - `parse_error`
 - `agent_step_error`
 - `sandbox_error`
 
-These values are persisted to `student_status` in output JSONL.
+`connection_error` may still appear in legacy artifacts, but current runtime normalization maps most connection/network failures to `http_error`.
+
+These status values are persisted to `student_status` in output JSONL.
+
+## Effective Timeout Scaling
+
+CLI `--timeout` is treated as a base timeout. Student calls are elevated to minimum floors:
+
+- Level A/default student tasks: `>= 360s`
+- Level B text/precursor/disconnection tasks: `>= 600s`
+- Level C or `full_synthesis`: `>= 900s`
+
+OpenShell SDK client timeout is also raised to at least `1200s`.
 
 ## Compatibility Guarantees
 
