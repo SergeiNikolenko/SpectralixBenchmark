@@ -860,6 +860,8 @@ def run_benchmark_inference(
     agent_backend: Optional[str] = None,
     agent_tools_profile: str = "minimal",
     agent_config: Optional[Path] = Path("scripts/agents/agent_config.yaml"),
+    agent_reasoning_effort: Optional[str] = None,
+    agent_sgr_enabled: bool = True,
     api_key: Optional[str] = None,
     student_guard_enabled: bool = True,
     student_guard_mode: str = "on_failure",
@@ -876,16 +878,23 @@ def run_benchmark_inference(
         questions = questions[:limit]
 
     try:
+        config_overrides = (
+            {"model": {"reasoning_effort": str(agent_reasoning_effort).strip().lower()}}
+            if agent_reasoning_effort
+            else None
+        )
         runtime = AgentRuntime(
             model_url=model_url,
             model_name=model_name,
             api_key=api_key,
             config_path=agent_config,
+            config_overrides=config_overrides,
             max_steps=agent_max_steps,
             sandbox=agent_sandbox,
             backend=agent_backend,
             tools_profile=agent_tools_profile,
             timeout_sec=timeout,
+            sgr_enabled=agent_sgr_enabled,
         )
         runtime.preflight()
         get_runtime_metadata = getattr(runtime, "get_runtime_metadata", None)
@@ -1169,6 +1178,19 @@ if __name__ == "__main__":
         help="Path to agent YAML config (default: scripts/agents/agent_config.yaml)",
     )
     parser.add_argument(
+        "--agent-reasoning-effort",
+        type=str,
+        default=None,
+        choices=["low", "medium", "high"],
+        help="Optional override for agent model reasoning effort",
+    )
+    parser.add_argument(
+        "--agent-sgr-enabled",
+        type=_str_to_bool,
+        default=True,
+        help="Enable hidden SGR reasoning phase for student runtime (default: true)",
+    )
+    parser.add_argument(
         "--student-guard-enabled",
         type=_str_to_bool,
         default=True,
@@ -1248,6 +1270,8 @@ if __name__ == "__main__":
             agent_backend=args.agent_backend,
             agent_tools_profile=args.agent_tools_profile,
             agent_config=args.agent_config,
+            agent_reasoning_effort=args.agent_reasoning_effort,
+            agent_sgr_enabled=args.agent_sgr_enabled,
             student_guard_enabled=args.student_guard_enabled,
             student_guard_mode=args.student_guard_mode,
             student_guard_retries=args.student_guard_retries,

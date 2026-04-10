@@ -1,5 +1,6 @@
 import unittest
 import os
+import sys
 import tempfile
 from pathlib import Path
 from unittest import mock
@@ -239,6 +240,26 @@ class WorkspaceToolTests(unittest.TestCase):
                     os.environ.pop("AGENT_WORKSPACE_ROOT", None)
                 else:
                     os.environ["AGENT_WORKSPACE_ROOT"] = previous_root
+
+    def test_shell_exec_tool_allows_runtime_python_path(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            previous_root = os.environ.get("AGENT_WORKSPACE_ROOT")
+            previous_python = os.environ.get("PYTHON_BIN")
+            os.environ["AGENT_WORKSPACE_ROOT"] = tmp_dir
+            os.environ["PYTHON_BIN"] = sys.executable
+            try:
+                result = shell_exec_tool(f"{sys.executable} -c 'print(123)'", workdir=".", timeout_sec=5)
+                self.assertIn('"status": "ok"', result)
+                self.assertIn('"stdout": "123"', result)
+            finally:
+                if previous_root is None:
+                    os.environ.pop("AGENT_WORKSPACE_ROOT", None)
+                else:
+                    os.environ["AGENT_WORKSPACE_ROOT"] = previous_root
+                if previous_python is None:
+                    os.environ.pop("PYTHON_BIN", None)
+                else:
+                    os.environ["PYTHON_BIN"] = previous_python
 
     def test_shell_exec_tool_blocks_non_allowlisted_command(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -739,6 +760,22 @@ class OpenShellWorkerSGRTests(unittest.TestCase):
         self.assertIsNone(result["sgr_payload"])
         self.assertEqual(len(result["steps"]), 3)
 
+    def test_worker_can_run_without_sgr(self):
+        payload = self._student_payload()
+        payload["sgr_enabled"] = False
+        with mock.patch.object(
+            openshell_worker,
+            "_run_tool_loop",
+            return_value={"state": "success", "output": "Answer: ok", "error": "", "steps": [{"step_number": 1}]},
+        ):
+            result = openshell_worker._main_for_test(payload) if hasattr(openshell_worker, "_main_for_test") else openshell_worker._run_student_without_sgr(payload)
+
+        self.assertEqual(result["state"], "success")
+        self.assertEqual(result["sgr_validation_status"], "disabled")
+        self.assertEqual(result["sgr_schema_name"], "")
+        self.assertFalse(result["sgr_repair_attempted"])
+        self.assertFalse(result["sgr_fallback_used"])
+
     def test_student_sgr_prompt_includes_schema_block(self):
         spec = mock.Mock(schema_name="sgr_b_generic", template={"level": "B", "contract_check": {}, "final_answer": {"value": ""}})
         prompt = build_student_sgr_task(
@@ -758,6 +795,12 @@ class OpenShellWorkerSGRTests(unittest.TestCase):
         self.assertIn("<sgr_schema>", prompt)
         self.assertIn("Schema name: sgr_b_generic", prompt)
         self.assertIn("Return exactly one JSON object", prompt)
+
+    def test_runtime_context_uses_payload_workspace_root(self):
+        payload = self._student_payload()
+        payload["workspace_root"] = "/tmp/workspace"
+        context = openshell_worker._build_runtime_context(payload, [])
+        self.assertEqual(context["workspace_root"], "/tmp/workspace")
 
     def test_student_prompt_includes_validated_sgr_context(self):
         prompt = build_student_task(

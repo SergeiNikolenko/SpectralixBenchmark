@@ -253,6 +253,18 @@ def _workspace_root() -> Path:
     return Path(os.getenv("AGENT_WORKSPACE_ROOT") or "/sandbox/workspace").resolve()
 
 
+def _runtime_bin_dirs() -> List[str]:
+    entries = [os.getenv("AGENT_UV_BIN") or "", os.getenv("PYTHON_BIN") or ""]
+    dirs: List[str] = []
+    for entry in entries:
+        if not entry:
+            continue
+        parent = str(Path(entry).resolve().parent)
+        if parent not in dirs:
+            dirs.append(parent)
+    return dirs
+
+
 def _resolve_workspace_path(raw_path: str) -> Path:
     root = _workspace_root()
     candidate = (raw_path or "").strip()
@@ -414,6 +426,10 @@ def shell_exec_tool(command: str, timeout_sec: int = 30, workdir: str = ".") -> 
         "head",
         "sed",
     }
+    for runtime_path in (os.getenv("AGENT_UV_BIN") or "", os.getenv("PYTHON_BIN") or ""):
+        if runtime_path:
+            allowed_commands.add(runtime_path)
+            allowed_commands.add(str(Path(runtime_path).resolve()))
     executable = argv[0]
     if executable not in allowed_commands:
         return json.dumps(
@@ -423,7 +439,9 @@ def shell_exec_tool(command: str, timeout_sec: int = 30, workdir: str = ".") -> 
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
-    env["PATH"] = f"/sandbox/.venv/bin:{env.get('PATH', '')}"
+    runtime_dirs = _runtime_bin_dirs()
+    if runtime_dirs:
+        env["PATH"] = f"{':'.join(runtime_dirs)}:{env.get('PATH', '')}"
 
     try:
         proc = subprocess.run(
@@ -479,7 +497,9 @@ def uv_run_tool(args: str, timeout_sec: int = 60, workdir: str = ".") -> str:
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
-    env["PATH"] = f"/sandbox/.venv/bin:{env.get('PATH', '')}"
+    runtime_dirs = _runtime_bin_dirs()
+    if runtime_dirs:
+        env["PATH"] = f"{':'.join(runtime_dirs)}:{env.get('PATH', '')}"
 
     try:
         proc = subprocess.run(

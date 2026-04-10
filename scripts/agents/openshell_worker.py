@@ -144,6 +144,34 @@ def _extract_json_object(raw_text: str) -> Dict[str, Any]:
     return parsed
 
 
+def _step_budget_message(*, step_number: int, max_steps: int, phase: str) -> Dict[str, str]:
+    remaining_after_this = max(0, max_steps - step_number)
+    phase_name = phase or "main"
+    if remaining_after_this == 0:
+        instruction = (
+            "This is your last allowed step. "
+            "Return the final benchmark answer now. Do not call more tools unless a final tool call is strictly required."
+        )
+    elif remaining_after_this == 1:
+        instruction = (
+            "You have one step left after this one. "
+            "If the answer is nearly ready, finalize now instead of exploring."
+        )
+    else:
+        instruction = (
+            "Conserve steps. "
+            "If the answer is already clear, finalize instead of using another tool."
+        )
+    return {
+        "role": "system",
+        "content": (
+            f"Step budget status: phase={phase_name}; current_step={step_number}; "
+            f"max_steps={max_steps}; remaining_after_this={remaining_after_this}. "
+            f"{instruction}"
+        ),
+    }
+
+
 def _build_sgr_repair_task(schema_name: str, schema_lines: str, invalid_payload: str, error_message: str) -> str:
     return (
         "Repair the invalid SGR JSON into a valid JSON object.\n"
@@ -161,7 +189,7 @@ def _build_sgr_repair_task(schema_name: str, schema_lines: str, invalid_payload:
 def _build_runtime_context(payload: Dict[str, Any], tool_definitions: List[Any]) -> Dict[str, Any]:
     return {
         "tools_profile": str(payload["tools_profile"]),
-        "workspace_root": "/sandbox/workspace",
+        "workspace_root": str(payload.get("workspace_root") or "/sandbox/workspace"),
         "available_tools": [item.name for item in tool_definitions],
     }
 
@@ -277,8 +305,8 @@ def _run_tool_loop(
 
     os.environ["AGENT_ALLOWED_HOSTS"] = ",".join(config.get("security", {}).get("allowed_tool_hosts") or [])
     os.environ["PYTHON_BIN"] = sys.executable
-    os.environ["AGENT_WORKSPACE_ROOT"] = "/sandbox/workspace"
-    os.environ["AGENT_UV_BIN"] = "/sandbox/.venv/bin/uv"
+    os.environ["AGENT_WORKSPACE_ROOT"] = str(payload.get("workspace_root") or "/sandbox/workspace")
+    os.environ["AGENT_UV_BIN"] = str(payload.get("uv_bin") or "/sandbox/.venv/bin/uv")
 
     steps: List[Dict[str, Any]] = []
     final_answer = ""
@@ -288,16 +316,25 @@ def _run_tool_loop(
     min_interval_seconds = (60.0 / requests_per_minute) if requests_per_minute > 0 else 0.0
     next_request_not_before = 0.0
 
-    for step_number in range(1, int(payload.get("max_steps") or 1) + 1):
+    max_steps = max(1, int(payload.get("max_steps") or 1))
+    for step_number in range(1, max_steps + 1):
         if min_interval_seconds > 0:
             sleep_for = next_request_not_before - time.monotonic()
             if sleep_for > 0:
                 time.sleep(sleep_for)
         started_at = time.perf_counter()
+        request_messages = list(messages)
+        request_messages.append(
+            _step_budget_message(
+                step_number=step_number,
+                max_steps=max_steps,
+                phase=step_phase,
+            )
+        )
         response = _chat_completion_with_retry(
             client=client,
             model=model,
-            messages=messages,
+            messages=request_messages,
             tool_definitions=tool_definitions,
         )
         if min_interval_seconds > 0:
@@ -417,6 +454,22 @@ def _run_student_with_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _run_student_without_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
+    tool_definitions = build_tool_definitions(str(payload["tools_profile"]), payload["config"])
+    result = _run_tool_loop(
+        payload=payload,
+        messages=_student_messages(payload, tool_definitions),
+        tool_definitions=tool_definitions,
+        step_phase="final_answer",
+    )
+    result["sgr_schema_name"] = ""
+    result["sgr_payload"] = None
+    result["sgr_validation_status"] = "disabled"
+    result["sgr_repair_attempted"] = False
+    result["sgr_fallback_used"] = False
+    return result
+
+
 def _parser_messages(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     image_bytes = base64.b64decode(payload["image_base64"])
     image_url = "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")
@@ -450,7 +503,10 @@ def _main() -> int:
     mode = str(payload.get("mode") or "").strip().lower()
 
     if mode == "student":
-        result = _run_student_with_sgr(payload)
+        if bool(payload.get("sgr_enabled", True)):
+            result = _run_student_with_sgr(payload)
+        else:
+            result = _run_student_without_sgr(payload)
     elif mode == "parser":
         result = _run_tool_loop(payload=payload, messages=_parser_messages(payload))
     else:

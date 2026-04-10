@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 import base64
 import json
 import logging
+import shutil
 import subprocess
 import sys
 
@@ -33,24 +34,27 @@ class AgentRuntime:
         *,
         api_key: Optional[str] = None,
         config_path: Optional[Path] = None,
+        config_overrides: Optional[Dict[str, Any]] = None,
         max_steps: int = 6,
         sandbox: str = "openshell",
         backend: Optional[str] = None,
         tools_profile: str = "minimal",
         timeout_sec: int = 120,
+        sgr_enabled: bool = True,
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.workspace_dir = Path(__file__).resolve().parents[2]
         self.max_steps = max(1, int(max_steps))
         self.timeout_sec = max(1, int(timeout_sec))
         self.tools_profile = tools_profile
-        self.config = load_agent_config(config_path)
+        self.config = load_agent_config(config_path, overrides=config_overrides)
         self.executor_type = sandbox or (self.config.get("sandbox") or {}).get("executor_type", "openshell")
         self.runtime_backend = resolve_runtime_backend(
             self.config,
             executor_type=self.executor_type,
             requested_backend=backend,
         )
+        self.sgr_enabled = bool(sgr_enabled)
         self.executor_kwargs = (
             build_executor_kwargs(self.config, self.workspace_dir)
             if self.executor_type == "openshell"
@@ -83,6 +87,9 @@ class AgentRuntime:
             "config": self.config,
             "tools_profile": self.tools_profile,
             "max_steps": self.max_steps,
+            "sgr_enabled": self.sgr_enabled,
+            "workspace_root": self._payload_workspace_root(),
+            "uv_bin": self._payload_uv_bin(),
         }
         result = self._run_payload(payload)
         return str(result.get("output") or "").strip()
@@ -100,6 +107,8 @@ class AgentRuntime:
             "config": self.config,
             "tools_profile": "minimal",
             "max_steps": self.max_steps,
+            "workspace_root": self._payload_workspace_root(),
+            "uv_bin": self._payload_uv_bin(),
         }
         result = self._run_payload(payload)
         raw = str(result.get("output") or "").strip()
@@ -161,6 +170,16 @@ class AgentRuntime:
         if self.executor_type == "openshell":
             payload["api_key"] = ""
         return payload
+
+    def _payload_workspace_root(self) -> str:
+        if self.executor_type == "local":
+            return str(self.workspace_dir)
+        return "/sandbox/workspace"
+
+    def _payload_uv_bin(self) -> str:
+        if self.executor_type == "local":
+            return str(shutil.which("uv") or "")
+        return "/sandbox/.venv/bin/uv"
 
     def _run_payload(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         try:

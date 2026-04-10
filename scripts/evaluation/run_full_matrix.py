@@ -630,6 +630,19 @@ def parse_args() -> argparse.Namespace:
         help="Path to agent config YAML",
     )
     parser.add_argument(
+        "--agent-reasoning-effort",
+        type=str,
+        default=None,
+        choices=["low", "medium", "high"],
+        help="Optional override for student agent reasoning effort",
+    )
+    parser.add_argument(
+        "--agent-sgr-enabled",
+        type=str,
+        default="true",
+        help="Enable hidden SGR reasoning phase in student runtime (true/false, default: true)",
+    )
+    parser.add_argument(
         "--student-guard-enabled",
         type=str,
         default="true",
@@ -877,6 +890,8 @@ def main() -> None:
                     "agent_backend": args.agent_backend,
                     "agent_tools_profile": args.agent_tools_profile,
                     "agent_config": str(args.agent_config),
+                    "agent_reasoning_effort": args.agent_reasoning_effort,
+                    "agent_sgr_enabled": _is_truthy(args.agent_sgr_enabled),
                     "judge_model": args.judge_model,
                     "judge_reasoning_effort": args.judge_reasoning_effort,
                     "resume_existing": resume_existing,
@@ -905,6 +920,8 @@ def main() -> None:
                     agent_backend=args.agent_backend,
                     agent_tools_profile=args.agent_tools_profile,
                     agent_config=args.agent_config,
+                    agent_reasoning_effort=args.agent_reasoning_effort,
+                    agent_sgr_enabled=_is_truthy(args.agent_sgr_enabled),
                     student_guard_enabled=student_guard_enabled,
                     student_guard_mode=args.student_guard_mode,
                     student_guard_retries=args.student_guard_retries,
