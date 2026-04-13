@@ -1,13 +1,17 @@
 # Benchmark Levels
 
-This directory contains the benchmark ladder files used for the paper-oriented setup.
+This directory contains the public benchmark ladder artifacts used for paper
+evaluation and runtime execution.
 
-## Files
+## Public Files
 
-- `level_a.jsonl`
-- `level_b.jsonl`
-- `level_c.jsonl`
+- `README.md`
+- `level_a_eval.jsonl`
+- `level_b_eval.jsonl`
+- `level_c_eval.jsonl`
+- `benchmark_v3_eval.jsonl`
 - `levels_manifest.yaml`
+- `paper_eval_manifest.yaml`
 
 ## Unified Record Schema
 
@@ -33,7 +37,7 @@ Each JSONL row follows the same top-level shape:
 
 ## Level A
 
-`level_a.jsonl` is a reaction-understanding file.
+`Level A` is the reaction-understanding layer of the benchmark ladder.
 
 Included sources:
 
@@ -49,12 +53,19 @@ Primary task subtypes:
 - `reaction_center_identification`
 - `mechanistic_classification`
 - `transformation_classification`
+
+Auxiliary grounding subtypes associated with this source layer:
+
 - `reagent_role_identification`
 - `condition_role_identification`
 
+In taxonomy-aware reporting these are exposed under auxiliary suite `G`
+("Procedure Grounding"), even though the legacy source rows still originate
+from the broader `Level A` construction layer.
+
 ## Level B
 
-`level_b.jsonl` is a single-step retrosynthesis file.
+`Level B` is the single-step retrosynthesis layer.
 
 Included sources:
 
@@ -66,11 +77,9 @@ Primary task subtypes:
 - `immediate_precursor_prediction`
 - `immediate_precursor_with_disconnection`
 
-`level_b.jsonl` is now an extended agent pool. `ORDerly` remains the cleaner benchmark-like source, while `PaRoutes selected_reactions_all` expands coverage for large-scale agent solving.
-
 ## Level C
 
-`level_c.jsonl` is a conservative multi-step synthesis planning subset taken from the internal pilot benchmark.
+`Level C` is the route-level synthesis planning layer.
 
 Included source:
 
@@ -85,7 +94,8 @@ Selection policy:
 
 ## Usage Notes
 
-- The current `level_a.jsonl`, `level_b.jsonl`, and `level_c.jsonl` files are large agent pools.
-- They are suitable for assigning tasks to agents at scale.
-- They are not yet equivalent to final paper-ready eval subsets.
-- Final paper eval sets should be smaller, expert-checked, and balanced across subcategories and difficulty.
+- `benchmark_v3_eval.jsonl` is the primary end-to-end evaluation entrypoint.
+- The per-level `*_eval.jsonl` files are the public paper-facing subsets.
+- `benchmark_v1_0.jsonl` is retained separately as a source/compatibility file
+  for selected legacy `Level C` route-design records, but it is not the primary
+  benchmark entrypoint.

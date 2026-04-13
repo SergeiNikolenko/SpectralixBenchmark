@@ -32,11 +32,11 @@ uv run python scripts/build_paper_eval_subsets.py
 
 ## Smoke Runs
 
-Smoke student stage on legacy benchmark:
+Smoke student stage on the materialized `benchmark_v3` eval set:
 
 ```bash
 uv run python -m scripts.evaluation.student_validation \
-  --benchmark-path benchmark/benchmark_v1_0.jsonl \
+  --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --output-path scripts/evaluation/student_output_smoke.jsonl \
   --api-base-url "$API_BASE_URL" \
   --model-name "gpt-5.4-mini" \
@@ -48,13 +48,6 @@ uv run python -m scripts.evaluation.student_validation \
   --limit 5
 ```
 
-Existing ladder smoke outputs:
-
-- `benchmark/smoke_reports/2026-03-13_gpt-5-codex-mini_local/level_a_smoke.jsonl`
-- `benchmark/smoke_reports/2026-03-13_gpt-5-codex-mini_local/level_b_smoke.jsonl`
-- `benchmark/smoke_reports/2026-03-13_gpt-5-codex-mini_local/level_c_smoke.jsonl`
-- `benchmark/smoke_reports/2026-03-13_gpt-5-codex-mini_local/summary.json`
-
 ## Judge Modes
 
 Run judge with rubric-based `g_eval`:
@@ -62,7 +55,7 @@ Run judge with rubric-based `g_eval`:
 ```bash
 uv run python -m scripts.evaluation.llm_judge \
   --input-path scripts/evaluation/student_output.jsonl \
-  --gold-path benchmark/benchmark_v1_0.jsonl \
+  --gold-path benchmark/benchmark_v3_eval.jsonl \
   --judge-model "gpt-5.4-mini" \
   --judge-model-url "$API_BASE_URL" \
   --judge-api-key "$CLIPROXY_API_KEY" \
@@ -108,6 +101,7 @@ uv run python -m scripts.evaluation.run_full_matrix \
 For implementation details:
 
 - `docs/g_eval.md`
+- `scripts/evaluation/README.md`
 
 ## Validation Helpers
 

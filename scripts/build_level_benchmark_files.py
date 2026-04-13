@@ -863,6 +863,7 @@ def write_manifest(stats: BuildStats) -> None:
         "      - convergence",
         "      - key_intermediates_partial",
         "notes:",
+        "  - paths under files.* refer to generated large pools used during benchmark construction; they are not tracked in the public repository.",
         "  - difficulty and coverage_tags are now first-class fields on every record.",
         "  - level_a and level_b are large agent pools, not paper-ready eval subsets.",
         "  - mechanistic_class/selectivity remain incomplete and need curated eval-layer annotation.",

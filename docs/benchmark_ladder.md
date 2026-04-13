@@ -26,8 +26,7 @@ Suggested paper-facing subtracks:
 
 Data files:
 
-- pool: `benchmark/level_a.jsonl`
-- paper eval subset: `benchmark/level_a_eval.jsonl`
+- public eval subset: `benchmark/level_a_eval.jsonl`
 
 ## Level B - Single-Step Disconnection Reasoning
 
@@ -48,8 +47,7 @@ Suggested paper-facing subtracks:
 
 Data files:
 
-- pool: `benchmark/level_b.jsonl`
-- paper eval subset: `benchmark/level_b_eval.jsonl`
+- public eval subset: `benchmark/level_b_eval.jsonl`
 
 ## Level C - Route-Level Synthesis Planning
 
@@ -70,8 +68,7 @@ Suggested paper-facing subtracks:
 
 Data files:
 
-- pool: `benchmark/level_c.jsonl`
-- paper eval subset: `benchmark/level_c_eval.jsonl`
+- public eval subset: `benchmark/level_c_eval.jsonl`
 
 ## Auxiliary Suite G - Procedure Grounding
 
@@ -99,9 +96,13 @@ Use these manifests as source of truth:
 - `benchmark/paper_eval_manifest.yaml`
 - taxonomy overlay: `scripts/evaluation/benchmark_taxonomy.py`
 
+`levels_manifest.yaml` documents the generated large-pool layer used during
+benchmark construction. Those pool files are not tracked in the public
+repository; the public runtime entrypoint remains `benchmark/benchmark_v3_eval.jsonl`.
+
 ## Operational Use
 
-- For large-scale agent workloads, use pool files (`level_a.jsonl`, `level_b.jsonl`, `level_c.jsonl`).
 - For reproducible paper comparisons and rapid checks, use eval subsets (`*_eval.jsonl`).
-- For baseline viability checks, use smoke reports under:
-  - `benchmark/smoke_reports/`
+- For end-to-end benchmark runs, use the materialized file `benchmark/benchmark_v3_eval.jsonl`.
+- For baseline viability checks, run ad hoc smoke subsets against `benchmark/benchmark_v3_eval.jsonl`
+  and keep generated outputs outside the tracked repository tree.

@@ -132,7 +132,7 @@ Fail-fast on model limits:
 
 ```bash
 uv run python -m scripts.evaluation.student_validation \
-  --benchmark-path benchmark/benchmark_v1_0.jsonl \
+  --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --output-path scripts/evaluation/student_output.jsonl \
   --api-base-url "http://127.0.0.1:8317/v1" \
   --model-name "gpt-5.3-codex-spark" \
@@ -163,7 +163,7 @@ It uses rubric-guided structured judging and can fall back to the standard struc
 ```bash
 uv run python -m scripts.evaluation.llm_judge \
   --input-path scripts/evaluation/student_output.jsonl \
-  --gold-path benchmark/benchmark_v1_0.jsonl \
+  --gold-path benchmark/benchmark_v3_eval.jsonl \
   --judge-model "gpt-5.4-mini" \
   --reasoning-effort high \
   --judge-model-url "http://127.0.0.1:8317/v1" \
@@ -181,7 +181,7 @@ It supports `--resume-existing true|false` and forwards it to student + judge st
 
 ```bash
 uv run python -m scripts.evaluation.run_full_matrix \
-  --benchmark-path benchmark/benchmark_v1_0.jsonl \
+  --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --api-base-url "http://127.0.0.1:8317/v1" \
   --api-key "ccs-internal-managed" \
   --models gpt-5.3-codex-spark \
@@ -240,8 +240,10 @@ Notes:
 - Current `/v1/models` availability should be checked before long runs. In this environment
   the local `ccs` endpoint exposes `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex-spark`,
   `gpt-5.2-codex`, `gpt-5-codex-mini`, and related `gpt-5.x` variants.
-- `benchmark/benchmark_v1_0.jsonl` remains supported as a legacy input, but
-  new benchmark reporting should use `benchmark/benchmark_v3_eval.jsonl`.
+- `benchmark/benchmark_v1_0.jsonl` is retained only as a source/compatibility
+  layer for selected build paths.
+- New benchmark execution and reporting should use
+  `benchmark/benchmark_v3_eval.jsonl`.
 
 ## Output Contracts
 

@@ -1,61 +1,83 @@
 ## External Benchmark Sources
 
-Collected on 2026-03-12.
+This directory is the provenance layer for rebuilding the benchmark from raw
+sources. The public repository tracks only metadata and instructions. Downloaded
+archives and extracted datasets are intentionally ignored.
 
-This directory stores external sources gathered for the new benchmark ladder:
+## Directory Structure
 
-- `level_a/`: reaction understanding sources
-- `level_b/`: single-step retrosynthesis sources
-- `shared/`: sources useful for both levels
-- `blocked/`: sources that could not be downloaded automatically because of access, licensing, or commercial restrictions
+- `level_a/`: sources used for local reaction reasoning tasks
+- `level_b/`: sources used for single-step retrosynthesis tasks
+- `shared/`: sources reused across multiple benchmark levels
+- `blocked/`: sources that were intentionally not downloaded because they are
+  commercial or require non-automatable access
 
-Downloaded sources in this directory are third-party data. Check each source license before reuse or redistribution.
+## Source Inventory
 
-## Normalized Layout
+The complete machine-readable manifest is in `manifest.yaml`. The current source
+catalog is:
 
-Each source directory follows the same structure:
+### Level A
 
-- `raw/`: original downloaded files
-- `extracted/`: locally unpacked or normalized contents
+- `chemu_2020`: [Mendeley Data](https://data.mendeley.com/datasets/wy6745bjfj/2)
+- `choriso`: [Figshare](https://figshare.com/articles/dataset/CHORISO_-_chemical_reaction_SMILES_from_academic_journals/22598230)
+- `pmechdb`: [official download page](https://deeprxn.ics.uci.edu/pmechdb/download)
+- `uspto_50k`: [Zenodo](https://zenodo.org/records/8114657)
+- `uspto_llm`: [Zenodo](https://zenodo.org/records/14396156)
+- `weave2`: [Zenodo](https://zenodo.org/records/8386296)
 
-Example:
+### Level B
+
+- `lowe_uspto`: [Figshare](https://figshare.com/articles/dataset/Chemical_reactions_from_US_patents_1976-Sep2016_/5104873)
+- `orderly`: [Figshare collection](https://figshare.com/articles/collection/ORDerly_supplementary_datasets/23502372)
+- `paroutes`: [GitHub](https://github.com/MolecularAI/PaRoutes)
+
+### Shared
+
+- `ord`: [GitHub](https://github.com/Open-Reaction-Database/ord-data)
+
+## Blocked or Restricted Sources
+
+These sources are documented but not redistributed:
+
+- `RMechDB`: request-form plus email-delivery workflow
+- `Pistachio`: commercial
+- `Reaxys`: commercial
+
+See `blocked/*.txt` for the exact notes captured during collection.
+
+## Expected Local Layout
+
+For each source, populate this structure locally:
 
 ```text
-external_sources/level_a/pmechdb/
+external_sources/<group>/<source>/
   raw/
   extracted/
 ```
 
-## Source Groups
+The exact files expected by the build scripts are listed in `manifest.yaml`.
 
-### Level A
+## Rebuild Workflow
 
-- `chemu_2020/`
-- `choriso/`
-- `pmechdb/`
-- `rmechdb/`
-- `uspto_50k/`
-- `uspto_llm/`
-- `weave2/`
+After downloading the required public sources into the expected layout:
 
-### Level B
+1. build the normalized benchmark pools
+2. derive the paper-eval subsets
+3. materialize the runtime-facing `benchmark_v3_eval.jsonl`
 
-- `lowe_uspto/`
-- `orderly/`
-- `paroutes/`
+Commands:
 
-### Shared
-
-- `ord/`
-
-## Key Artifacts
-
-- [manifest.yaml](/Users/nikolenko/.codex/worktrees/a55a/SpectralixBenchmark/external_sources/manifest.yaml)
-- [inventory.csv](/Users/nikolenko/.codex/worktrees/a55a/SpectralixBenchmark/external_sources/inventory.csv)
-- [inventory.md](/Users/nikolenko/.codex/worktrees/a55a/SpectralixBenchmark/external_sources/inventory.md)
+```bash
+uv run python scripts/build_level_benchmark_files.py
+uv run python scripts/build_paper_eval_subsets.py
+uv run python -m scripts.evaluation.materialize_benchmark_v3_eval \
+  --output benchmark/benchmark_v3_eval.jsonl
+```
 
 ## Notes
 
-- `PMechDB` bulk data was downloaded through the official form workflow and unpacked locally.
-- `RMechDB` does not expose a public bulk URL; the official workflow is request form plus email delivery.
-- `Pistachio` and `Reaxys` are commercial products and were not downloaded.
+- `benchmark/benchmark_v1_0.jsonl` remains part of the public repository because
+  selected `Level C` route-design tasks still depend on it.
+- The public repository intentionally excludes raw downloaded datasets to keep
+  the benchmark package lightweight and redistributable.

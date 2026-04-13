@@ -255,7 +255,8 @@ def write_manifest(counts: dict[str, int]) -> None:
 def write_doc() -> None:
     text = """# Paper Eval Subsets
 
-These files are compact paper-oriented evaluation subsets built on top of the large benchmark pools.
+These files are compact paper-oriented evaluation subsets built on top of the
+generated benchmark pools used during benchmark construction.
 
 ## Files
 
@@ -263,6 +264,10 @@ These files are compact paper-oriented evaluation subsets built on top of the la
 - `level_b_eval.jsonl`
 - `level_c_eval.jsonl`
 - `paper_eval_manifest.yaml`
+
+The public repository tracks these eval subsets directly. The large pool files
+used during subset construction are generated artifacts and are not versioned in
+the public repository.
 
 ## Intended Sizes
 

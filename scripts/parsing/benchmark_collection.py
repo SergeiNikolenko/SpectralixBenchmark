@@ -5,10 +5,10 @@ from typing import List, Dict
 
 # ================= CONFIGURATION =================
 
-# Папка, где лежат результаты работы пайплайна (папки по exam_id)
+# Directory containing parser pipeline outputs (one subdirectory per exam_id)
 INPUT_BASE_DIR = Path("./exam_data/output")
 
-# Итоговый файл
+# Consolidated JSONL output file
 OUTPUT_FILE = Path("./benchmark_dataset.jsonl")
 
 # ================= MAIN LOGIC =================
@@ -23,11 +23,10 @@ def collect_benchmark():
     total_questions = 0
     processed_exams = 0
     
-    # Открываем итоговый файл на запись
+    # Open the consolidated output file for writing.
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as out_f:
         
-        # Перебираем все папки внутри output (exam_1, exam_2, ...)
-        # Сортируем, чтобы порядок был детерминированным
+        # Iterate over all exam directories in a deterministic order.
         for exam_dir in sorted(INPUT_BASE_DIR.iterdir()):
             
             if not exam_dir.is_dir() or exam_dir.name == "errors":
@@ -42,7 +41,7 @@ def collect_benchmark():
             print(f"Processing {exam_dir.name}...")
             
             try:
-                # Читаем файл страницы за страницей
+                # Read the file page by page.
                 with open(jsonl_path, 'r', encoding='utf-8') as in_f:
                     for line_num, line in enumerate(in_f, 1):
                         if not line.strip():
@@ -54,8 +53,7 @@ def collect_benchmark():
                             print(f"  Warning: Invalid JSON in {jsonl_path} at line {line_num}")
                             continue
 
-                        # Извлекаем метаданные страницы
-                        # Эти поля будут добавлены к каждому вопросу
+                        # Page metadata is attached to every flattened question.
                         page_meta = {
                             "exam_id": page_data.get("exam_id"),
                             "page_id": page_data.get("page_id"),
@@ -64,7 +62,7 @@ def collect_benchmark():
                         
                         questions_list = page_data.get("parsed_questions", [])
                         
-                        # Проходим по каждому вопросу на этой странице
+                        # Flatten each question on the page into the output stream.
                         for q in questions_list:
                             flat_question = {**page_meta, **q}
                             out_f.write(json.dumps(flat_question) + "\n")

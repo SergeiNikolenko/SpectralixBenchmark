@@ -56,7 +56,7 @@ Quick smoke test:
 
 ```bash
 uv run python -m scripts.evaluation.student_validation \
-  --benchmark-path benchmark/benchmark_v1_0.jsonl \
+  --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --output-path scripts/evaluation/student_output_smoke.jsonl \
   --api-base-url "http://127.0.0.1:8317/v1" \
   --model-name "gpt-5.4-mini" \

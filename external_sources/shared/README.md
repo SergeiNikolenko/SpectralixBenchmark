@@ -10,6 +10,7 @@ Expected local layout for each source:
 Tracked in git:
 
 - this README only
+- source URLs and expected files are documented in `external_sources/manifest.yaml`
 
 Kept local and ignored:
 

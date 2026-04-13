@@ -134,7 +134,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-prefix",
         type=Path,
-        default=Path("analysis/task_subtype_report"),
+        default=Path("reports/task_subtype_report"),
         help="Output prefix without extension",
     )
     return parser.parse_args()

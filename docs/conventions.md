@@ -9,8 +9,9 @@
 
 ## Benchmark Data Conventions
 
-- Treat `benchmark/*.jsonl` large pools as generated outputs.
-- Do not hand-edit generated large pools.
+- Treat `benchmark/benchmark_v3_eval.jsonl` and the per-level `*_eval.jsonl`
+  files as materialized benchmark artifacts.
+- Do not hand-edit generated benchmark JSONL files.
 - Use builder scripts for reproducible regeneration:
   - `scripts/build_level_benchmark_files.py`
   - `scripts/build_paper_eval_subsets.py`
@@ -46,6 +47,6 @@ If schema-related assumptions change, update:
 
 ## Documentation Hygiene
 
-- Keep AGENTS.md as a table of contents and decision router.
+- Keep the top-level documentation entrypoints concise and navigable.
 - Put detailed guidance in `docs/*` pages.
 - Update docs in the same change when behavior or benchmark semantics change.

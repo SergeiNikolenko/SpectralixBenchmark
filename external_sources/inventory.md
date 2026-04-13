@@ -40,4 +40,4 @@
 | `paroutes` | 1 | 1591829 | 38 | 3307160 |
 | `ord` | 1 | 1175492752 | 559 | 1176044355 |
 
-Detailed machine-readable metadata is in [inventory.csv](/Users/nikolenko/.codex/worktrees/a55a/SpectralixBenchmark/external_sources/inventory.csv).
+Detailed machine-readable metadata is in `inventory.csv`.

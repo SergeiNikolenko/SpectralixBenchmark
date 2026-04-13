@@ -21,7 +21,8 @@ uv sync
 
 ## Required Inputs
 
-Place exam PDFs in:
+Raw exam assets are not versioned in this repository. Mount or copy your own
+PDF set into:
 
 ```bash
 exam_data/exams/
