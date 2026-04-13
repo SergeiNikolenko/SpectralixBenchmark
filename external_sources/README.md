@@ -69,11 +69,17 @@ After downloading the required public sources into the expected layout:
 Commands:
 
 ```bash
-uv run python -m spectralix_benchmark.build.level_benchmark_files
-uv run python -m spectralix_benchmark.build.paper_eval_subsets
-uv run python -m spectralix_benchmark.evaluation.materialize_benchmark_v3_eval \
+uv run spectralix-build-levels
+uv run spectralix-build-paper-eval
+uv run spectralix-materialize \
   --output benchmark/benchmark_v3_eval.jsonl
 ```
+
+Builder interface note:
+
+- build modules expose explicit CLI arguments and support `--help`
+- missing required source files or benchmark pools produce immediate fail-fast errors
+- run `spectralix-build-levels --help`, `spectralix-build-paper-eval --help`, and `spectralix-materialize --help` for supported options
 
 ## Notes
 

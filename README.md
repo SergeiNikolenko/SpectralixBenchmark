@@ -86,6 +86,25 @@ uv sync
 
 The package is importable as `spectralix_benchmark`.
 
+## CLI Entry Points
+
+Installed package entry points:
+
+- `spectralix-student`
+- `spectralix-judge`
+- `spectralix-matrix`
+- `spectralix-materialize`
+- `spectralix-build`
+- `spectralix-build-levels`
+- `spectralix-build-paper-eval`
+
+Module entry points remain supported for compatibility:
+
+- `python -m spectralix_benchmark.evaluation.student_validation`
+- `python -m spectralix_benchmark.evaluation.llm_judge`
+- `python -m spectralix_benchmark.evaluation.run_full_matrix`
+- `python -m spectralix_benchmark.evaluation.materialize_benchmark_v3_eval`
+
 ## Runtime Setup
 
 Export your model endpoint and API key:
@@ -111,14 +130,14 @@ gateway are available.
 ### 1. Materialize the runtime-facing benchmark file
 
 ```bash
-uv run python -m spectralix_benchmark.evaluation.materialize_benchmark_v3_eval \
+uv run spectralix-materialize \
   --output benchmark/benchmark_v3_eval.jsonl
 ```
 
 ### 2. Run student inference
 
 ```bash
-uv run python -m spectralix_benchmark.evaluation.student_validation \
+uv run spectralix-student \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --output-path runs/repro/student_output.jsonl \
   --api-base-url "$API_BASE_URL" \
@@ -135,7 +154,7 @@ uv run python -m spectralix_benchmark.evaluation.student_validation \
 ### 3. Run the judge
 
 ```bash
-uv run python -m spectralix_benchmark.evaluation.llm_judge \
+uv run spectralix-judge \
   --input-path runs/repro/student_output.jsonl \
   --gold-path benchmark/benchmark_v3_eval.jsonl \
   --judge-model "gpt-5.4-mini" \
@@ -150,7 +169,7 @@ uv run python -m spectralix_benchmark.evaluation.llm_judge \
 ### 4. Run the full matrix pipeline
 
 ```bash
-uv run python -m spectralix_benchmark.evaluation.run_full_matrix \
+uv run spectralix-matrix \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --api-base-url "$API_BASE_URL" \
   --api-key "$CLIPROXY_API_KEY" \
@@ -179,11 +198,14 @@ larger benchmark pools:
 3. run:
 
 ```bash
-uv run python -m spectralix_benchmark.build.level_benchmark_files
-uv run python -m spectralix_benchmark.build.paper_eval_subsets
-uv run python -m spectralix_benchmark.evaluation.materialize_benchmark_v3_eval \
+uv run spectralix-build-levels
+uv run spectralix-build-paper-eval
+uv run spectralix-materialize \
   --output benchmark/benchmark_v3_eval.jsonl
 ```
+
+Build modules expose argparse CLIs, support `--help`, and fail fast on missing
+source files or benchmark pools.
 
 Restricted/commercial sources are documented in `external_sources/blocked/` but
 are not redistributed.

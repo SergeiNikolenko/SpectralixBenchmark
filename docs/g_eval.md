@@ -21,8 +21,8 @@ only where semantic grading is actually required.
 
 At a high level the flow is:
 
-1. `student_validation.py` writes `student_output.jsonl`
-2. `llm_judge.py` joins student rows with benchmark rows
+1. `spectralix_benchmark.evaluation.student_validation` writes `student_output.jsonl`
+2. `spectralix_benchmark.evaluation.llm_judge` joins student rows with benchmark rows
 3. deterministic answer types are scored directly in code
 4. open-ended answer types go through `g_eval`
 5. rubric scores (`0..10`) are normalized to `0.0..1.0`
@@ -63,7 +63,7 @@ Deterministic scoring is used for exact or mostly exact answer types such as:
 - `property_determination`
 - `full_synthesis`
 
-This split is implemented in `spectralix_benchmark/evaluation/llm_judge.py`.
+This split is implemented in `spectralix_benchmark.evaluation.llm_judge`.
 
 ## Structured Judge Output
 

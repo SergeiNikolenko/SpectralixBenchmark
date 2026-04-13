@@ -103,7 +103,6 @@ class AgentRuntime:
             self._openshell_manager.ensure_sandbox(
                 model_settings=self.model_settings,
                 tools_profile=self.tools_profile,
-                backend=self.runtime_backend,
             )
         self._preflight_done = True
 
@@ -120,11 +119,7 @@ class AgentRuntime:
     def get_runtime_metadata(self) -> Dict[str, Any]:
         tool_definitions = build_tool_definitions(self.tools_profile, self.config)
         requested_tools = list((((self.config.get("tools") or {}).get("profiles") or {}).get(self.tools_profile) or []))
-        configured_local_tools = (
-            []
-            if self.runtime_backend == "codex_native"
-            else [item.name for item in tool_definitions]
-        )
+        configured_local_tools = [item.name for item in tool_definitions]
         return {
             "executor_type": self.executor_type,
             "runtime_backend": self.runtime_backend,
@@ -134,12 +129,8 @@ class AgentRuntime:
             "allow_network_tools": bool((self.config.get("security") or {}).get("allow_network_tools", False)),
             "allowed_tool_hosts": list((self.config.get("security") or {}).get("allowed_tool_hosts") or []),
             "model_api_base": self.model_settings.api_base,
-            "managed_inference": self.executor_type == "openshell" and self.runtime_backend == "openshell_worker",
-            "sandbox_runtime": (
-                "openshell_codex_native"
-                if self.runtime_backend == "codex_native"
-                else ("openshell" if self.executor_type == "openshell" else "local_worker")
-            ),
+            "managed_inference": self.executor_type == "openshell",
+            "sandbox_runtime": "openshell" if self.executor_type == "openshell" else "local_worker",
         }
 
     def _payload_model_settings(self) -> Dict[str, Any]:
@@ -170,13 +161,7 @@ class AgentRuntime:
             else:
                 if self._openshell_manager is None:
                     raise AgentRuntimeError(status="sandbox_error", message="OpenShell manager not initialized")
-                if self.runtime_backend == "codex_native":
-                    result = self._openshell_manager.exec_codex_worker(
-                        payload=payload,
-                        timeout_seconds=worker_timeout,
-                    )
-                else:
-                    result = self._openshell_manager.exec_worker(payload=payload, timeout_seconds=worker_timeout)
+                result = self._openshell_manager.exec_worker(payload=payload, timeout_seconds=worker_timeout)
             self._last_run_details = result
             if str(result.get("state") or "").strip().lower() != "success":
                 message = str(result.get("error") or result.get("output") or "agent worker returned error state").strip()
@@ -223,8 +208,6 @@ class AgentRuntime:
             return "auth_error"
         if any(keyword in text for keyword in ["openshell", "sandbox", "gateway", "docker"]):
             return "sandbox_error"
-        if any(keyword in text for keyword in ["codex", "auth required", "invalid refresh token"]):
-            return "auth_error"
         if any(keyword in text for keyword in ["tool", "step", "worker failed"]):
             return "agent_step_error"
         if "connection" in text or "network" in text:

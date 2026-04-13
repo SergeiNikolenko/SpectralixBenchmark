@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import json
 import zipfile
@@ -7,7 +8,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +89,158 @@ class BuildStats:
     level_a_records: int
     level_b_records: int
     level_c_records: int
+
+
+def _configure_paths(
+    *,
+    benchmark_dir: Path,
+    external_sources_dir: Path,
+    level_a_output: Path,
+    level_b_output: Path,
+    level_c_output: Path,
+    levels_manifest: Path,
+    pilot_benchmark: Path,
+) -> None:
+    global BENCHMARK_DIR, EXTERNAL_SOURCES_DIR
+    global LEVEL_A_OUTPUT, LEVEL_B_OUTPUT, LEVEL_C_OUTPUT, LEVELS_MANIFEST
+    global PMECHDB_MANUAL_TEST, PMECHDB_COMBINATORIAL_TEST, USPTO_50K_TEST
+    global CHEMU_NER_TRAIN, CHEMU_NER_DEV, CHORISO_PUBLIC, WEAVE2_DIR
+    global ORDERLY_RETRO_TEST, PAROUTES_SELECTED_REACTIONS, PAROUTES_N1_ROUTES, PAROUTES_N5_ROUTES
+    global PILOT_BENCHMARK
+
+    BENCHMARK_DIR = benchmark_dir.resolve()
+    EXTERNAL_SOURCES_DIR = external_sources_dir.resolve()
+
+    LEVEL_A_OUTPUT = level_a_output.resolve()
+    LEVEL_B_OUTPUT = level_b_output.resolve()
+    LEVEL_C_OUTPUT = level_c_output.resolve()
+    LEVELS_MANIFEST = levels_manifest.resolve()
+    PILOT_BENCHMARK = pilot_benchmark.resolve()
+
+    PMECHDB_MANUAL_TEST = (
+        EXTERNAL_SOURCES_DIR
+        / "level_a/pmechdb/extracted/dataset/pmechdb_data/manually_curated_test_challenging.csv"
+    )
+    PMECHDB_COMBINATORIAL_TEST = (
+        EXTERNAL_SOURCES_DIR
+        / "level_a/pmechdb/extracted/dataset/pmechdb_data/combinatorial_test.csv"
+    )
+    USPTO_50K_TEST = EXTERNAL_SOURCES_DIR / "level_a/uspto_50k/raw/uspto50k_test.csv"
+    CHEMU_NER_TRAIN = EXTERNAL_SOURCES_DIR / "level_a/chemu_2020/raw/chemu.ner.train.zip"
+    CHEMU_NER_DEV = EXTERNAL_SOURCES_DIR / "level_a/chemu_2020/raw/chemu.ner.dev.zip"
+    CHORISO_PUBLIC = (
+        EXTERNAL_SOURCES_DIR / "level_a/choriso/extracted/choriso_public/choriso_public.tsv"
+    )
+    WEAVE2_DIR = EXTERNAL_SOURCES_DIR / "level_a/weave2/extracted/weave2/weave2"
+
+    ORDERLY_RETRO_TEST = EXTERNAL_SOURCES_DIR / "level_b/orderly/raw/orderly_retro_test.parquet"
+    PAROUTES_SELECTED_REACTIONS = (
+        EXTERNAL_SOURCES_DIR
+        / "level_b/paroutes/extracted/PaRoutes-main/data/selected_reactions_all.csv"
+    )
+    PAROUTES_N1_ROUTES = (
+        EXTERNAL_SOURCES_DIR / "level_b/paroutes/extracted/PaRoutes-main/data/n1-routes.json"
+    )
+    PAROUTES_N5_ROUTES = (
+        EXTERNAL_SOURCES_DIR / "level_b/paroutes/extracted/PaRoutes-main/data/n5-routes.json"
+    )
+
+
+def _required_input_paths() -> list[Path]:
+    return [
+        PMECHDB_MANUAL_TEST,
+        PMECHDB_COMBINATORIAL_TEST,
+        USPTO_50K_TEST,
+        CHEMU_NER_TRAIN,
+        CHEMU_NER_DEV,
+        CHORISO_PUBLIC,
+        WEAVE2_DIR,
+        ORDERLY_RETRO_TEST,
+        PAROUTES_SELECTED_REACTIONS,
+        PAROUTES_N1_ROUTES,
+        PAROUTES_N5_ROUTES,
+        PILOT_BENCHMARK,
+    ]
+
+
+def _fail_fast_on_missing_inputs() -> None:
+    missing = [path for path in _required_input_paths() if not path.exists()]
+    if not missing:
+        return
+    joined = "\n".join(f" - {path}" for path in missing)
+    raise FileNotFoundError(f"Missing required input paths:\n{joined}")
+
+
+def _build_plan_payload(*, dry_run: bool) -> dict[str, Any]:
+    inputs = [str(path) for path in _required_input_paths()]
+    outputs = [
+        str(LEVEL_A_OUTPUT),
+        str(LEVEL_B_OUTPUT),
+        str(LEVEL_C_OUTPUT),
+        str(LEVELS_MANIFEST),
+    ]
+    return {
+        "mode": "dry-run" if dry_run else "build",
+        "benchmark_dir": str(BENCHMARK_DIR),
+        "external_sources_dir": str(EXTERNAL_SOURCES_DIR),
+        "inputs": inputs,
+        "outputs": outputs,
+    }
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build benchmark_v3 Level A/B/C large pools and levels manifest.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--benchmark-dir",
+        type=Path,
+        default=BENCHMARK_DIR,
+        help="Directory with benchmark artifacts and output targets.",
+    )
+    parser.add_argument(
+        "--external-sources-dir",
+        type=Path,
+        default=EXTERNAL_SOURCES_DIR,
+        help="Directory with external source datasets.",
+    )
+    parser.add_argument(
+        "--level-a-output",
+        type=Path,
+        default=None,
+        help="Output JSONL path for Level A pool.",
+    )
+    parser.add_argument(
+        "--level-b-output",
+        type=Path,
+        default=None,
+        help="Output JSONL path for Level B pool.",
+    )
+    parser.add_argument(
+        "--level-c-output",
+        type=Path,
+        default=None,
+        help="Output JSONL path for Level C pool.",
+    )
+    parser.add_argument(
+        "--levels-manifest",
+        type=Path,
+        default=None,
+        help="Output YAML path for levels manifest.",
+    )
+    parser.add_argument(
+        "--pilot-benchmark",
+        type=Path,
+        default=None,
+        help="Input JSONL path with pilot route-planning tasks used in Level C.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate inputs and print planned paths without writing outputs.",
+    )
+    return parser.parse_args(argv)
 
 
 def json_ready(value: Any) -> Any:
@@ -885,18 +1038,38 @@ def build() -> BuildStats:
     return stats
 
 
-def main() -> None:
-    stats = build()
-    print(
-        json.dumps(
-            {
-                "level_a_records": stats.level_a_records,
-                "level_b_records": stats.level_b_records,
-                "level_c_records": stats.level_c_records,
-            },
-            indent=2,
-        )
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
+    benchmark_dir = args.benchmark_dir.resolve()
+    _configure_paths(
+        benchmark_dir=benchmark_dir,
+        external_sources_dir=args.external_sources_dir.resolve(),
+        level_a_output=(args.level_a_output or (benchmark_dir / "level_a.jsonl")).resolve(),
+        level_b_output=(args.level_b_output or (benchmark_dir / "level_b.jsonl")).resolve(),
+        level_c_output=(args.level_c_output or (benchmark_dir / "level_c.jsonl")).resolve(),
+        levels_manifest=(args.levels_manifest or (benchmark_dir / "levels_manifest.yaml")).resolve(),
+        pilot_benchmark=(args.pilot_benchmark or (benchmark_dir / "benchmark_v1_0.jsonl")).resolve(),
     )
+
+    try:
+        _fail_fast_on_missing_inputs()
+        if args.dry_run:
+            print(json.dumps(_build_plan_payload(dry_run=True), indent=2))
+            return
+
+        stats = build()
+    except Exception as exc:
+        raise SystemExit(f"[ERROR] {exc}") from exc
+
+    payload = _build_plan_payload(dry_run=False)
+    payload.update(
+        {
+            "level_a_records": stats.level_a_records,
+            "level_b_records": stats.level_b_records,
+            "level_c_records": stats.level_c_records,
+        }
+    )
+    print(json.dumps(payload, indent=2))
 
 
 if __name__ == "__main__":

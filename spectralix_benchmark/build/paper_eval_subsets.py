@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import hashlib
 import heapq
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +21,128 @@ LEVEL_B_EVAL = BENCHMARK_DIR / "level_b_eval.jsonl"
 LEVEL_C_EVAL = BENCHMARK_DIR / "level_c_eval.jsonl"
 PAPER_EVAL_MANIFEST = BENCHMARK_DIR / "paper_eval_manifest.yaml"
 PAPER_EVAL_DOC = BENCHMARK_DIR / "PAPER_EVALS.md"
+
+
+def _configure_paths(
+    *,
+    benchmark_dir: Path,
+    level_a_pool: Path,
+    level_b_pool: Path,
+    level_c_pool: Path,
+    level_a_eval: Path,
+    level_b_eval: Path,
+    level_c_eval: Path,
+    paper_eval_manifest: Path,
+    paper_eval_doc: Path,
+) -> None:
+    global BENCHMARK_DIR
+    global LEVEL_A_POOL, LEVEL_B_POOL, LEVEL_C_POOL
+    global LEVEL_A_EVAL, LEVEL_B_EVAL, LEVEL_C_EVAL
+    global PAPER_EVAL_MANIFEST, PAPER_EVAL_DOC
+
+    BENCHMARK_DIR = benchmark_dir.resolve()
+    LEVEL_A_POOL = level_a_pool.resolve()
+    LEVEL_B_POOL = level_b_pool.resolve()
+    LEVEL_C_POOL = level_c_pool.resolve()
+    LEVEL_A_EVAL = level_a_eval.resolve()
+    LEVEL_B_EVAL = level_b_eval.resolve()
+    LEVEL_C_EVAL = level_c_eval.resolve()
+    PAPER_EVAL_MANIFEST = paper_eval_manifest.resolve()
+    PAPER_EVAL_DOC = paper_eval_doc.resolve()
+
+
+def _required_input_paths() -> list[Path]:
+    return [LEVEL_A_POOL, LEVEL_B_POOL, LEVEL_C_POOL]
+
+
+def _fail_fast_on_missing_inputs() -> None:
+    missing = [path for path in _required_input_paths() if not path.exists()]
+    if not missing:
+        return
+    joined = "\n".join(f" - {path}" for path in missing)
+    raise FileNotFoundError(f"Missing required input pools:\n{joined}")
+
+
+def _build_plan_payload(*, dry_run: bool) -> dict[str, Any]:
+    return {
+        "mode": "dry-run" if dry_run else "build",
+        "benchmark_dir": str(BENCHMARK_DIR),
+        "inputs": [str(path) for path in _required_input_paths()],
+        "outputs": [
+            str(LEVEL_A_EVAL),
+            str(LEVEL_B_EVAL),
+            str(LEVEL_C_EVAL),
+            str(PAPER_EVAL_MANIFEST),
+            str(PAPER_EVAL_DOC),
+        ],
+    }
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Build deterministic paper evaluation subsets from Level A/B/C pools.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--benchmark-dir",
+        type=Path,
+        default=BENCHMARK_DIR,
+        help="Directory with benchmark pools and subset outputs.",
+    )
+    parser.add_argument(
+        "--level-a-pool",
+        type=Path,
+        default=None,
+        help="Input JSONL pool for Level A records.",
+    )
+    parser.add_argument(
+        "--level-b-pool",
+        type=Path,
+        default=None,
+        help="Input JSONL pool for Level B records.",
+    )
+    parser.add_argument(
+        "--level-c-pool",
+        type=Path,
+        default=None,
+        help="Input JSONL pool for Level C records.",
+    )
+    parser.add_argument(
+        "--level-a-eval",
+        type=Path,
+        default=None,
+        help="Output JSONL path for Level A paper eval subset.",
+    )
+    parser.add_argument(
+        "--level-b-eval",
+        type=Path,
+        default=None,
+        help="Output JSONL path for Level B paper eval subset.",
+    )
+    parser.add_argument(
+        "--level-c-eval",
+        type=Path,
+        default=None,
+        help="Output JSONL path for Level C paper eval subset.",
+    )
+    parser.add_argument(
+        "--paper-eval-manifest",
+        type=Path,
+        default=None,
+        help="Output YAML path for paper eval manifest.",
+    )
+    parser.add_argument(
+        "--paper-eval-doc",
+        type=Path,
+        default=None,
+        help="Output markdown path for paper eval documentation.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate input pools and print planned paths without writing outputs.",
+    )
+    return parser.parse_args(argv)
 
 
 def stable_rank(record_id: str) -> int:
@@ -329,9 +452,35 @@ def build() -> dict[str, int]:
     return counts
 
 
-def main() -> None:
-    counts = build()
-    print(json.dumps(counts, indent=2))
+def main(argv: Sequence[str] | None = None) -> None:
+    args = parse_args(argv)
+    benchmark_dir = args.benchmark_dir.resolve()
+    _configure_paths(
+        benchmark_dir=benchmark_dir,
+        level_a_pool=(args.level_a_pool or (benchmark_dir / "level_a.jsonl")).resolve(),
+        level_b_pool=(args.level_b_pool or (benchmark_dir / "level_b.jsonl")).resolve(),
+        level_c_pool=(args.level_c_pool or (benchmark_dir / "level_c.jsonl")).resolve(),
+        level_a_eval=(args.level_a_eval or (benchmark_dir / "level_a_eval.jsonl")).resolve(),
+        level_b_eval=(args.level_b_eval or (benchmark_dir / "level_b_eval.jsonl")).resolve(),
+        level_c_eval=(args.level_c_eval or (benchmark_dir / "level_c_eval.jsonl")).resolve(),
+        paper_eval_manifest=(
+            args.paper_eval_manifest or (benchmark_dir / "paper_eval_manifest.yaml")
+        ).resolve(),
+        paper_eval_doc=(args.paper_eval_doc or (benchmark_dir / "PAPER_EVALS.md")).resolve(),
+    )
+
+    try:
+        _fail_fast_on_missing_inputs()
+        if args.dry_run:
+            print(json.dumps(_build_plan_payload(dry_run=True), indent=2))
+            return
+        counts = build()
+    except Exception as exc:
+        raise SystemExit(f"[ERROR] {exc}") from exc
+
+    payload = _build_plan_payload(dry_run=False)
+    payload.update(counts)
+    print(json.dumps(payload, indent=2))
 
 
 if __name__ == "__main__":

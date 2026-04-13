@@ -5,24 +5,24 @@
 - Keep benchmark contracts stable while enabling agentic execution.
 - Enforce sandboxed execution for tool-capable model runs.
 - Preserve deterministic scoring and reproducible evaluation outputs.
-- Keep a single production runtime for student-stage inference (no legacy backend).
-- Keep a single OpenShell-backed runtime while adding strict structured guards via `PydanticAI`.
+- Keep OpenShell as the single production runtime for student-stage inference.
+- Keep strict structured guards via `PydanticAI`.
 
 ## High-Level Flow
 
-1. `student_validation.py`
+1. `spectralix_benchmark.evaluation.student_validation`
 - Reads benchmark rows
 - Produces `student_answer` per row via `AgentRuntime`
 - Applies optional `PydanticAI` student guard (`on_failure|always|off`)
 - Writes `student_output.jsonl`
 
-2. `llm_judge.py`
+2. `spectralix_benchmark.evaluation.llm_judge`
 - Joins student rows with canonical benchmark rows
 - Applies deterministic scoring where possible
 - Uses structured `PydanticAI` judge for non-deterministic types
 - Writes `llm_judge_output.jsonl`
 
-3. `run_full_matrix.py`
+3. `spectralix_benchmark.evaluation.run_full_matrix`
 - Runs student inference + judge across multiple models
 - Produces per-model metrics and run summary artifacts
 
@@ -39,9 +39,9 @@
   - OpenShell managed inference base selection (`https://inference.local/v1`)
   - Upstream base URL rewriting for host-side provider configuration
 
-- `tool_registry.py`
-  - Explicit tool set
-  - Tool profile resolution
+- `tools/`
+  - Explicit tool implementations grouped by concern
+  - Tool registry and profile resolution
   - Security-aware tool enablement (allowlist, network-tool gating)
 
 - `prompts.py`
@@ -51,7 +51,8 @@
 - `runtime.py`
   - `AgentRuntime` orchestration
   - One-time OpenShell sandbox preflight before execution
-  - Local or OpenShell worker execution
+  - Local worker execution for local sandbox mode
+  - OpenShell worker execution (`openshell_worker`) for default runtime mode
   - Runtime error normalization
   - Effective timeout scaling by benchmark level/subtype
 
@@ -69,7 +70,7 @@
   - OpenAI-compatible chat loop inside the sandbox against `https://inference.local/v1`
   - Tool invocation and step capture
 
-- `sgr_schemas.py`
+- `sgr/`
   - Level A/B/C generic schemas and subtype-specific schema variants
   - `level/task_subtype -> schema` selector
   - Schema validation and compact SGR snapshot helpers
@@ -176,3 +177,4 @@ OpenShell SDK client timeout is also raised to at least `1200s`.
 
 - `docs/g_eval.md`
 - `docs/security_runbook.md`
+- `docs/tools/README.md`

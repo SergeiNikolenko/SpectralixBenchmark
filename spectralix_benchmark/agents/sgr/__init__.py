@@ -1,10 +1,12 @@
-from .sgr import (
+from .models import (
     GenericASchema,
     GenericBSchema,
     MechanisticClassificationSchema,
     ReferenceRoutePlanningSchema,
     SGRBaseSchema,
     SGRSchemaSpec,
+)
+from .specs import (
     ValidationError,
     compact_sgr_payload,
     extract_contract_check,

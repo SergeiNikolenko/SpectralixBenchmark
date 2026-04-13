@@ -159,7 +159,7 @@ class JudgeStructuredTests(unittest.TestCase):
             _write_single_judge_case(input_path, gold_path)
 
             with mock.patch(
-                "spectralix_benchmark.evaluation.llm_judge.run_structured_judge",
+                "spectralix_benchmark.evaluation.pipeline.llm_judge.run_structured_judge",
                 side_effect=RuntimeError("insufficient_quota"),
             ):
                 with self.assertRaisesRegex(RuntimeError, "limit exceeded"):
@@ -187,7 +187,7 @@ class JudgeStructuredTests(unittest.TestCase):
             _write_single_judge_case(input_path, gold_path)
 
             with mock.patch(
-                "spectralix_benchmark.evaluation.llm_judge.run_structured_judge",
+                "spectralix_benchmark.evaluation.pipeline.llm_judge.run_structured_judge",
                 return_value={
                     "llm_score": 0.6,
                     "llm_comment": "structured ok",
@@ -222,7 +222,7 @@ class JudgeStructuredTests(unittest.TestCase):
             _write_single_judge_case(input_path, gold_path)
 
             with mock.patch(
-                "spectralix_benchmark.evaluation.llm_judge.run_g_eval_judge",
+                "spectralix_benchmark.evaluation.pipeline.llm_judge.run_g_eval_judge",
                 return_value={
                     "llm_score": 0.8,
                     "llm_comment": "good match",
@@ -260,10 +260,10 @@ class JudgeStructuredTests(unittest.TestCase):
             _write_single_judge_case(input_path, gold_path)
 
             with mock.patch(
-                "spectralix_benchmark.evaluation.llm_judge.run_g_eval_judge",
+                "spectralix_benchmark.evaluation.pipeline.llm_judge.run_g_eval_judge",
                 side_effect=RuntimeError("g_eval failed"),
             ), mock.patch(
-                "spectralix_benchmark.evaluation.llm_judge.run_structured_judge",
+                "spectralix_benchmark.evaluation.pipeline.llm_judge.run_structured_judge",
                 return_value={
                     "llm_score": 0.6,
                     "llm_comment": "structured fallback",

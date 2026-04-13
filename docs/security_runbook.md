@@ -6,7 +6,7 @@ This runbook describes mandatory controls for running Spectralix agent workflows
 
 Applies to:
 
-- `spectralix_benchmark/evaluation/student_validation.py`
+- `spectralix_benchmark.evaluation.student_validation`
 - shared runtime under `spectralix_benchmark/agents/`
 
 ## Mandatory Controls
@@ -35,7 +35,7 @@ Applies to:
 - `PydanticAI` is a validation/repair layer only (`spectralix_benchmark/guards/*`).
 - It must not receive direct shell, arbitrary file-write, or unrestricted network tools.
 - It must run against the same OpenShell-managed model route as the main runtime.
-- Hidden SGR reasoning (`spectralix_benchmark/agents/sgr_schemas.py`) is internal student metadata and must not alter public benchmark output contracts.
+- Hidden SGR reasoning (`spectralix_benchmark/agents/sgr/*`) is internal student metadata and must not alter public benchmark output contracts.
 
 6. MCP policy
 - MCP is disabled by default.
@@ -54,7 +54,7 @@ uv run python -c "import openshell, yaml; print('ok')"
 Quick smoke test:
 
 ```bash
-uv run python -m spectralix_benchmark.evaluation.student_validation \
+uv run spectralix-student \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --output-path runs/security_smoke/student_output.jsonl \
   --api-base-url "http://127.0.0.1:8317/v1" \

@@ -51,13 +51,6 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
             "sandbox_from": "base",
             "ready_timeout_seconds": 180,
             "delete_on_close": False,
-            "native_codex": {
-                "sandbox_name": "spectralix-codex-runtime",
-                "sandbox_from": "codex",
-                "codex_bin": "codex",
-                "codex_home_dir": "/sandbox/.codex",
-                "upload_auth_from": "~/.codex/auth.json",
-            },
         },
     },
     "tools": {
@@ -97,7 +90,7 @@ DEFAULT_AGENT_CONFIG: Dict[str, Any] = {
 
 REQUIRED_CONFIG_SECTIONS = ("model", "runtime", "security", "sandbox", "tools")
 SUPPORTED_EXECUTORS = {"local", "openshell"}
-SUPPORTED_BACKENDS = {"local_worker", "openshell_worker", "codex_native"}
+SUPPORTED_BACKENDS = {"local_worker", "openshell_worker"}
 SUPPORTED_REASONING_EFFORTS = {"low", "medium", "high"}
 
 
@@ -184,17 +177,12 @@ def validate_agent_config(config: Dict[str, Any]) -> Dict[str, Any]:
         openshell_cfg = sandbox.get("openshell")
         if not isinstance(openshell_cfg, dict):
             raise ValueError("Agent config sandbox.openshell must be a mapping for openshell executor")
-        native_codex_cfg = openshell_cfg.get("native_codex", {})
-        if native_codex_cfg and not isinstance(native_codex_cfg, dict):
-            raise ValueError("Agent config sandbox.openshell.native_codex must be a mapping")
 
     effective_backend = resolve_runtime_backend(config, executor_type=executor_type)
     if executor_type == "local" and effective_backend != "local_worker":
         raise ValueError("Local executor supports only runtime.backend=local_worker")
-    if executor_type == "openshell" and effective_backend not in {"openshell_worker", "codex_native"}:
-        raise ValueError(
-            "OpenShell executor supports only runtime.backend in {'openshell_worker', 'codex_native'}"
-        )
+    if executor_type == "openshell" and effective_backend != "openshell_worker":
+        raise ValueError("OpenShell executor supports only runtime.backend=openshell_worker")
 
     security = _require_mapping(config, "security")
     allowed_hosts = security.get("allowed_tool_hosts", [])
@@ -259,7 +247,6 @@ def build_executor_kwargs(config: Dict[str, Any], workspace_dir: Path) -> Dict[s
         "sandbox_from": str(openshell_cfg.get("sandbox_from") or "base"),
         "ready_timeout_seconds": float(openshell_cfg.get("ready_timeout_seconds") or 180),
         "delete_on_close": bool(openshell_cfg.get("delete_on_close", False)),
-        "native_codex": deepcopy(openshell_cfg.get("native_codex") or {}),
     }
 
 
@@ -271,13 +258,32 @@ def resolve_runtime_backend(
 ) -> str:
     normalized_executor = str(executor_type or "").strip().lower()
     normalized_requested = str(requested_backend or "").strip().lower()
-    if normalized_executor == "local" and not normalized_requested:
-        return "local_worker"
+    if normalized_executor not in SUPPORTED_EXECUTORS:
+        raise ValueError(
+            f"Unsupported sandbox executor_type '{normalized_executor}'. Supported: {sorted(SUPPORTED_EXECUTORS)}"
+        )
+
     if normalized_requested:
+        if normalized_requested not in SUPPORTED_BACKENDS:
+            raise ValueError(
+                f"Unsupported runtime backend '{normalized_requested}'. Supported: {sorted(SUPPORTED_BACKENDS)}"
+            )
+        if normalized_executor == "local" and normalized_requested != "local_worker":
+            raise ValueError("Local executor supports only runtime.backend=local_worker")
+        if normalized_executor == "openshell" and normalized_requested != "openshell_worker":
+            raise ValueError("OpenShell executor supports only runtime.backend=openshell_worker")
         return normalized_requested
+
     configured = str(((config.get("runtime") or {}).get("backend") or "")).strip().lower()
+    if configured and configured not in SUPPORTED_BACKENDS:
+        raise ValueError(
+            f"Unsupported runtime backend '{configured}'. Supported: {sorted(SUPPORTED_BACKENDS)}"
+        )
     if normalized_executor == "local":
+        # For local executor we always run the local worker unless an explicit
+        # backend override was requested (handled above).
         return "local_worker"
-    if configured:
-        return configured
-    return "openshell_worker"
+
+    if configured and configured != "openshell_worker":
+        raise ValueError("OpenShell executor supports only runtime.backend=openshell_worker")
+    return configured or "openshell_worker"

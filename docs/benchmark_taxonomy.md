@@ -59,9 +59,11 @@ Primary breakdown artifacts:
 
 ## Compatibility
 
-- Legacy `level` and `answer_type` fields remain unchanged for runtime compatibility.
-- Existing completed runs are not rerun.
-- Existing completed runs are migrated in place:
-  - `llm_judge_output.jsonl` is enriched with taxonomy fields
-  - `metrics.json` is rewritten in benchmark taxonomy format
-  - `summary.json` / `summary.csv` become benchmark taxonomy summaries
+- Legacy `level` and `answer_type` fields remain present for runtime compatibility.
+- Judge rows are enriched with taxonomy metadata fields (`benchmark_suite`, `benchmark_subtrack`, `planning_horizon`, `task_mode`).
+- Run-level metrics expose taxonomy-aware breakdowns in:
+  - `breakdown_by_suite`
+  - `breakdown_by_subtrack`
+  - `breakdown_by_task_subtype`
+  - `breakdown_by_task_mode`
+  - `breakdown_by_planning_horizon`

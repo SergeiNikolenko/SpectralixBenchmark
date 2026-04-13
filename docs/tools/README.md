@@ -21,13 +21,42 @@ uv sync
 Rebuild large benchmark pools:
 
 ```bash
-uv run python -m spectralix_benchmark.build.level_benchmark_files
+uv run spectralix-build-levels
 ```
 
 Rebuild paper eval subsets:
 
 ```bash
-uv run python -m spectralix_benchmark.build.paper_eval_subsets
+uv run spectralix-build-paper-eval
+```
+
+Materialize the runtime-facing benchmark file:
+
+```bash
+uv run spectralix-materialize \
+  --output benchmark/benchmark_v3_eval.jsonl
+```
+
+Builder status:
+
+- `level_benchmark_files` and `paper_eval_subsets` expose dedicated argparse CLIs.
+- They are dataset-dependent and fail fast if expected source files or benchmark pools are missing.
+- `spectralix-build` provides a single umbrella entry point with `levels` and `paper-eval` subcommands.
+
+## CLI Sanity Checks
+
+Verify supported CLIs:
+
+```bash
+uv run spectralix-student --help
+uv run spectralix-judge --help
+uv run spectralix-matrix --help
+uv run spectralix-materialize --help
+uv run spectralix-build --help
+uv run python -m spectralix_benchmark.evaluation.student_validation --help
+uv run python -m spectralix_benchmark.evaluation.llm_judge --help
+uv run python -m spectralix_benchmark.evaluation.run_full_matrix --help
+uv run python -m spectralix_benchmark.evaluation.materialize_benchmark_v3_eval --help
 ```
 
 ## Smoke Runs
@@ -35,7 +64,7 @@ uv run python -m spectralix_benchmark.build.paper_eval_subsets
 Smoke student stage on the materialized `benchmark_v3` eval set:
 
 ```bash
-uv run python -m spectralix_benchmark.evaluation.student_validation \
+uv run spectralix-student \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --output-path runs/smoke/student_output.jsonl \
   --api-base-url "$API_BASE_URL" \
@@ -53,7 +82,7 @@ uv run python -m spectralix_benchmark.evaluation.student_validation \
 Run judge with rubric-based `g_eval`:
 
 ```bash
-uv run python -m spectralix_benchmark.evaluation.llm_judge \
+uv run spectralix-judge \
   --input-path runs/smoke/student_output.jsonl \
   --gold-path benchmark/benchmark_v3_eval.jsonl \
   --judge-model "gpt-5.4-mini" \
@@ -83,7 +112,7 @@ Notes:
 ## Full Matrix (OpenShell + Tools)
 
 ```bash
-uv run python -m spectralix_benchmark.evaluation.run_full_matrix \
+uv run spectralix-matrix \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --api-base-url "$API_BASE_URL" \
   --api-key "$CLIPROXY_API_KEY" \

@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from spectralix_benchmark.evaluation.pipeline import student_validation as student_validation_pipeline
+from spectralix_benchmark.evaluation.pipeline import run_full_matrix as run_full_matrix_pipeline
 from spectralix_benchmark.evaluation import student_validation as student_validation_module
 from spectralix_benchmark.evaluation import run_full_matrix as run_full_matrix_module
 
@@ -179,7 +181,7 @@ class StudentValidationContractTests(unittest.TestCase):
             output_path = tmp_path / "student_output.jsonl"
             _write_benchmark(benchmark_path)
 
-            with mock.patch.object(student_validation_module, "AgentRuntime", _FakeAgentRuntime):
+            with mock.patch.object(student_validation_pipeline, "AgentRuntime", _FakeAgentRuntime):
                 _FakeAgentRuntime.preflight_calls = 0
                 _FakeAgentRuntime.solve_calls = 0
                 _run_student_inference(benchmark_path, output_path)
@@ -208,7 +210,7 @@ class StudentValidationContractTests(unittest.TestCase):
             verbose_output_path = tmp_path / "student_output_verbose.jsonl"
             _write_benchmark(benchmark_path)
 
-            with mock.patch.object(student_validation_module, "AgentRuntime", _FakeAgentRuntime):
+            with mock.patch.object(student_validation_pipeline, "AgentRuntime", _FakeAgentRuntime):
                 _run_student_inference(
                     benchmark_path,
                     output_path,
@@ -238,7 +240,7 @@ class StudentValidationContractTests(unittest.TestCase):
             output_path = tmp_path / "student_output.jsonl"
             _write_benchmark(benchmark_path)
 
-            with mock.patch.object(student_validation_module, "AgentRuntime", _QuotaAgentRuntime):
+            with mock.patch.object(student_validation_pipeline, "AgentRuntime", _QuotaAgentRuntime):
                 with self.assertRaises(student_validation_module.ModelLimitExceededError):
                     _run_student_inference(benchmark_path, output_path)
 
@@ -342,12 +344,12 @@ class RunFullMatrixContractTests(unittest.TestCase):
                         f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
             with mock.patch.object(
-                run_full_matrix_module,
+                run_full_matrix_pipeline,
                 "run_benchmark_inference",
                 side_effect=fake_run_benchmark_inference,
             ):
                 with mock.patch.object(
-                    run_full_matrix_module,
+                    run_full_matrix_pipeline,
                     "run_llm_judge",
                     side_effect=fake_run_llm_judge,
                 ):
@@ -367,7 +369,7 @@ class RunFullMatrixContractTests(unittest.TestCase):
                             "--models",
                             "test-model",
                             "--agent-backend",
-                            "codex_native",
+                            "openshell_worker",
                         ],
                     ):
                         run_full_matrix_module.main()
@@ -399,7 +401,7 @@ class RunFullMatrixContractTests(unittest.TestCase):
             summary_rows = json.loads(summary_json_path.read_text(encoding="utf-8"))
             self.assertEqual(len(summary_rows), 1)
             self.assertEqual(summary_rows[0]["model_name"], "test-model")
-            self.assertEqual(inference_kwargs_seen["agent_backend"], "codex_native")
+            self.assertEqual(inference_kwargs_seen["agent_backend"], "openshell_worker")
 
 
 if __name__ == "__main__":
