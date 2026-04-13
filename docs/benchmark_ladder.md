@@ -6,7 +6,7 @@ For the detailed construction history, source mapping, inclusion/exclusion polic
 
 ## Levels
 
-## Level A - Reaction Understanding
+## Level A - Local Reaction Reasoning
 
 Primary objective:
 
@@ -17,15 +17,19 @@ Typical task subtypes:
 - `reaction_center_identification`
 - `mechanistic_classification`
 - `transformation_classification`
-- `reagent_role_identification`
-- `condition_role_identification`
+
+Suggested paper-facing subtracks:
+
+- `A1` bond-change localization
+- `A2` mechanistic inference
+- `A3` selectivity and stereochemistry reasoning
 
 Data files:
 
 - pool: `benchmark/level_a.jsonl`
 - paper eval subset: `benchmark/level_a_eval.jsonl`
 
-## Level B - Single-Step Retrosynthesis
+## Level B - Single-Step Disconnection Reasoning
 
 Primary objective:
 
@@ -36,26 +40,56 @@ Typical task subtypes:
 - `immediate_precursor_prediction`
 - `immediate_precursor_with_disconnection`
 
+Suggested paper-facing subtracks:
+
+- `B1` precursor proposal
+- `B2` disconnection justification
+- `B3` constraint-aware retrosynthesis
+
 Data files:
 
 - pool: `benchmark/level_b.jsonl`
 - paper eval subset: `benchmark/level_b_eval.jsonl`
 
-## Level C - Multi-Step Synthesis Planning
+## Level C - Route-Level Synthesis Planning
 
 Primary objective:
 
 - plan route-level synthesis with multi-step structure
 
-Typical task subtype:
+Typical task subtypes:
 
 - `reference_route_planning`
 - `route_design`
+
+Suggested paper-facing subtracks:
+
+- `C1` route completion or ranking
+- `C2` reference-route planning
+- `C3` open route design
 
 Data files:
 
 - pool: `benchmark/level_c.jsonl`
 - paper eval subset: `benchmark/level_c_eval.jsonl`
+
+## Auxiliary Suite G - Procedure Grounding
+
+Purpose:
+
+- keep chemistry IE and role-grounding tasks available without mixing them into the
+  core planning-depth score
+
+Current task subtypes remapped into `G` for reporting:
+
+- `reagent_role_identification`
+- `condition_role_identification`
+
+Important compatibility note:
+
+- the current legacy runtime still keeps these rows under legacy `level = A`
+- benchmark taxonomy reporting remaps them into auxiliary suite `G`
+- existing completed runs can be backfilled into this structure without rerunning
 
 ## Source and Size Truth
 
@@ -63,6 +97,7 @@ Use these manifests as source of truth:
 
 - `benchmark/levels_manifest.yaml`
 - `benchmark/paper_eval_manifest.yaml`
+- taxonomy overlay: `scripts/evaluation/benchmark_taxonomy.py`
 
 ## Operational Use
 

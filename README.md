@@ -29,7 +29,7 @@ Student inference uses a hidden two-phase flow:
 1. Build and validate an internal SGR schema object (`A/B/C` + subtype-specific variants).
 2. Generate the final benchmark-aligned answer using compact validated SGR context.
 
-This keeps `student_output.jsonl` unchanged while making reasoning structure explicit in traces and verbose artifacts.
+This keeps the raw student/judge pipeline stable while enriching emitted rows with explicit taxonomy and contract metadata.
 
 ## Benchmark Schema
 
@@ -117,6 +117,12 @@ materialize the `benchmark_v3` eval subsets into one evaluation file:
 ```bash
 uv run python -m scripts.evaluation.materialize_benchmark_v3_eval \
   --output benchmark/benchmark_v3_eval.jsonl
+
+# benchmark taxonomy fields are embedded during materialization:
+# - benchmark_suite / benchmark_subtrack
+# - planning_horizon / task_mode
+# - difficulty_proxies
+# - eval_contract_id / expected_output_schema / judge_rubric_id
 ```
 
 Then run the matrix pipeline against that materialized benchmark.
@@ -211,6 +217,23 @@ latest_run=$(ls -td runs/* | head -n 1)
 echo "$latest_run"
 cat "$latest_run/summary.csv"
 ```
+
+Migrate existing completed runs into the benchmark taxonomy structure without rerunning student/judge:
+
+```bash
+uv run python -m scripts.evaluation.migrate_run_artifacts \
+  --runs-root runs
+```
+
+This rewrites the primary reporting artifacts next to existing run outputs:
+
+- `llm_judge_output.jsonl` enriched with benchmark taxonomy fields
+- `metrics.json` rewritten in benchmark taxonomy format
+- `breakdown_by_suite.json`
+- `breakdown_by_subtrack.json`
+- `breakdown_by_task_mode.json`
+- `breakdown_by_planning_horizon.json`
+- `summary.json` / `summary.csv` rewritten in benchmark taxonomy format
 
 ## Parsing Quick Start
 

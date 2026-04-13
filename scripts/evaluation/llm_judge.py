@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from tqdm import tqdm
 
 from scripts.evaluation.judge_rubrics import get_g_eval_spec
+from scripts.evaluation.benchmark_taxonomy import get_benchmark_taxonomy_metadata
 from scripts.pydantic_guard.judge_geval import run_g_eval_judge
 from scripts.pydantic_guard.judge_structured import run_structured_judge
 
@@ -655,6 +656,7 @@ def run_llm_judge(
                     "difficulty": gold_q.get("difficulty", student.get("difficulty")),
                     "canonical_answer": gold_q.get("canonical_answer"),
                 }
+                judge_input.update(get_benchmark_taxonomy_metadata(judge_input))
 
                 student_status = str(student.get("student_status", "ok") or "ok")
                 if student_status != "ok":

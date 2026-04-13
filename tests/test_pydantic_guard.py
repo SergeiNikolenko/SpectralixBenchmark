@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from scripts.evaluation.llm_judge import build_g_eval_prompt, build_user_prompt, deterministic_score, run_llm_judge
 from scripts.evaluation.judge_rubrics import get_g_eval_spec
+from scripts.pydantic_guard import models as guard_models
 from scripts.pydantic_guard.retry import run_with_retries
 from scripts.pydantic_guard.parser_repair import PARSER_REPAIR_SYSTEM_PROMPT
 from scripts.pydantic_guard.schemas import GEvalJudgeResult, JudgeResult, ParsedQuestionSchema, StudentGuardOutput
@@ -287,6 +288,33 @@ class JudgeStructuredTests(unittest.TestCase):
             rows = _read_jsonl(output_path)
             self.assertEqual(rows[0]["score_method"], "structured_fallback")
             self.assertEqual(rows[0]["llm_comment"], "structured fallback")
+
+
+class GuardModelClientTests(unittest.TestCase):
+    def test_local_judge_model_constructs_async_client_with_trust_env_false(self):
+        with mock.patch.object(guard_models, "AsyncOpenAI", return_value="async-client") as mocked_async, mock.patch.object(
+            guard_models, "OpenAIProvider", return_value="provider"
+        ), mock.patch.object(guard_models, "OpenAIChatModel", return_value="chat-model"):
+            guard_models.build_openai_chat_model(
+                model_name="gpt-5.4-mini",
+                model_url="http://127.0.0.1:8317/v1/chat/completions",
+                api_key="test-key",
+            )
+
+        self.assertEqual(mocked_async.call_args.kwargs["base_url"], "http://127.0.0.1:8317/v1")
+        self.assertIn("http_client", mocked_async.call_args.kwargs)
+
+    def test_remote_judge_model_keeps_default_provider_path(self):
+        with mock.patch.object(guard_models, "OpenAIProvider", return_value="provider") as mocked_provider, mock.patch.object(
+            guard_models, "OpenAIChatModel", return_value="chat-model"
+        ):
+            guard_models.build_openai_chat_model(
+                model_name="gpt-5.4-mini",
+                model_url="https://api.openai.com/v1/chat/completions",
+                api_key="test-key",
+            )
+
+        self.assertEqual(mocked_provider.call_args.kwargs["base_url"], "https://api.openai.com/v1")
 
 
 class ParserRepairPromptTests(unittest.TestCase):

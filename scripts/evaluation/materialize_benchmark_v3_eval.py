@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from scripts.evaluation.benchmark_taxonomy import get_benchmark_taxonomy_metadata
+
 
 DEFAULT_INPUTS = [
     Path("benchmark/level_a_eval.jsonl"),
@@ -33,12 +35,21 @@ def _max_score_for_level(level: str) -> int:
 
 
 def _question_text(row: Dict[str, Any]) -> str:
+    taxonomy = get_benchmark_taxonomy_metadata(row)
     payload = {
         "level": row.get("level"),
         "task_family": row.get("task_family"),
         "task_subtype": row.get("task_subtype"),
         "difficulty": row.get("difficulty"),
         "coverage_tags": row.get("coverage_tags"),
+        "benchmark_suite": taxonomy.get("benchmark_suite"),
+        "benchmark_subtrack": taxonomy.get("benchmark_subtrack"),
+        "planning_horizon": taxonomy.get("planning_horizon"),
+        "task_mode": taxonomy.get("task_mode"),
+        "difficulty_proxies": taxonomy.get("difficulty_proxies"),
+        "eval_contract_id": taxonomy.get("eval_contract_id"),
+        "expected_output_schema": taxonomy.get("expected_output_schema"),
+        "judge_rubric_id": taxonomy.get("judge_rubric_id"),
         "input": row.get("input"),
     }
     return (
@@ -60,6 +71,7 @@ def _to_contract_row(row: Dict[str, Any]) -> Dict[str, Any]:
     source_id = str(row.get("source_id") or "unknown")
     source_split = str(row.get("source_split") or "eval")
     record_id = str(row.get("record_id") or "row")
+    taxonomy = get_benchmark_taxonomy_metadata(row)
     return {
         "exam_id": f"benchmark_v3_{level.lower()}",
         "page_id": f"{source_id}_{source_split}",
@@ -79,6 +91,7 @@ def _to_contract_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "task_subtype": row.get("task_subtype"),
         "difficulty": row.get("difficulty"),
         "coverage_tags": row.get("coverage_tags"),
+        **taxonomy,
         "benchmark_v3_record_id": row.get("record_id"),
         "benchmark_v3_input_text": row.get("input_text"),
         "benchmark_v3_input": row.get("input"),

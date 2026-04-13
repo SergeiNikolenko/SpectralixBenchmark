@@ -265,4 +265,4 @@ Student output (`student_output.jsonl`) schema is stable:
 - `student_total_tokens`
 - `student_reasoning_tokens`
 
-Judge output (`llm_judge_output.jsonl`) schema remains unchanged.
+Judge output (`llm_judge_output.jsonl`) now includes benchmark taxonomy metadata fields alongside the legacy scoring fields.

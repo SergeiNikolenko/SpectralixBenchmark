@@ -8,6 +8,7 @@ import time
 import base64
 from urllib.parse import urlparse
 
+import httpx
 from openai import OpenAI
 
 from .prompts import build_parse_page_task, build_student_sgr_task, build_student_task
@@ -22,18 +23,23 @@ def _build_client(model: Dict[str, Any]) -> OpenAI:
     default_headers: Dict[str, str] = {}
     api_key = str(model.get("api_key") or "")
     parsed = urlparse(api_base)
-    if (parsed.hostname or "").lower() == "inference.local":
+    hostname = (parsed.hostname or "").lower()
+    use_local_transport = hostname in {"127.0.0.1", "localhost", "inference.local"}
+    if hostname == "inference.local":
         api_key = "openshell-managed"
     if header_name.lower() != "authorization" or prefix.lower() != "bearer":
         token_value = f"{prefix} {api_key}".strip() if prefix else api_key
         default_headers[header_name] = token_value
         api_key = "unused_api_key"
-    return OpenAI(
-        base_url=api_base,
-        api_key=api_key,
-        default_headers=default_headers or None,
-        timeout=60.0,
-    )
+    client_kwargs: Dict[str, Any] = {
+        "base_url": api_base,
+        "api_key": api_key,
+        "default_headers": default_headers or None,
+        "timeout": 60.0,
+    }
+    if use_local_transport:
+        client_kwargs["http_client"] = httpx.Client(timeout=60.0, trust_env=False)
+    return OpenAI(**client_kwargs)
 
 
 def _extract_assistant_text(message: Any) -> str:
@@ -219,74 +225,91 @@ def _generate_sgr_payload(
     runtime_context = _build_runtime_context(payload, sgr_tools)
     runtime_context["sgr_schema_name"] = spec.schema_name
     runtime_context["sgr_schema_lines"] = schema_lines
-    initial_result = _run_tool_loop(
-        payload=payload,
-        messages=[
-            {"role": "system", "content": "You produce hidden structured chemistry reasoning JSON only."},
-            {"role": "user", "content": build_student_sgr_task(question, runtime_context=runtime_context, schema_spec=spec)},
-        ],
-        tool_definitions=sgr_tools,
-        step_phase="sgr",
-        step_number_offset=0,
-    )
-    initial_steps = list(initial_result.get("steps") or [])
+    steps_so_far: List[Dict[str, Any]] = []
     try:
-        validated = validate_sgr_payload(
-            str(question.get("level") or ""),
-            str(question.get("task_subtype") or ""),
-            _extract_json_object(str(initial_result.get("output") or "")),
-        )
-        return {
-            "sgr_schema_name": spec.schema_name,
-            "sgr_payload": validated.model_dump(),
-            "sgr_validation_status": "validated",
-            "sgr_repair_attempted": False,
-            "sgr_fallback_used": False,
-            "steps": initial_steps,
-        }
-    except Exception as first_error:
-        repair_result = _run_tool_loop(
+        initial_result = _run_tool_loop(
             payload=payload,
             messages=[
-                {"role": "system", "content": "You repair hidden structured chemistry reasoning JSON only."},
-                {
-                    "role": "user",
-                    "content": _build_sgr_repair_task(
-                        schema_name=spec.schema_name,
-                        schema_lines=schema_lines,
-                        invalid_payload=str(initial_result.get("output") or ""),
-                        error_message=str(first_error),
-                    ),
-                },
+                {"role": "system", "content": "You produce hidden structured chemistry reasoning JSON only."},
+                {"role": "user", "content": build_student_sgr_task(question, runtime_context=runtime_context, schema_spec=spec)},
             ],
-            tool_definitions=[],
-            step_phase="sgr_repair",
-            step_number_offset=len(initial_steps),
+            tool_definitions=sgr_tools,
+            step_phase="sgr",
+            step_number_offset=0,
         )
-        combined_steps = initial_steps + list(repair_result.get("steps") or [])
+        initial_steps = list(initial_result.get("steps") or [])
+        steps_so_far.extend(initial_steps)
         try:
             validated = validate_sgr_payload(
                 str(question.get("level") or ""),
                 str(question.get("task_subtype") or ""),
-                _extract_json_object(str(repair_result.get("output") or "")),
+                _extract_json_object(str(initial_result.get("output") or "")),
             )
             return {
                 "sgr_schema_name": spec.schema_name,
                 "sgr_payload": validated.model_dump(),
-                "sgr_validation_status": "validated_after_repair",
-                "sgr_repair_attempted": True,
+                "sgr_validation_status": "validated",
+                "sgr_repair_attempted": False,
                 "sgr_fallback_used": False,
-                "steps": combined_steps,
+                "steps": initial_steps,
+                "sgr_error": "",
             }
-        except Exception:
-            return {
-                "sgr_schema_name": spec.schema_name,
-                "sgr_payload": None,
-                "sgr_validation_status": "fallback_after_repair_failure",
-                "sgr_repair_attempted": True,
-                "sgr_fallback_used": True,
-                "steps": combined_steps,
-            }
+        except Exception as first_error:
+            repair_result = _run_tool_loop(
+                payload=payload,
+                messages=[
+                    {"role": "system", "content": "You repair hidden structured chemistry reasoning JSON only."},
+                    {
+                        "role": "user",
+                        "content": _build_sgr_repair_task(
+                            schema_name=spec.schema_name,
+                            schema_lines=schema_lines,
+                            invalid_payload=str(initial_result.get("output") or ""),
+                            error_message=str(first_error),
+                        ),
+                    },
+                ],
+                tool_definitions=[],
+                step_phase="sgr_repair",
+                step_number_offset=len(initial_steps),
+            )
+            combined_steps = initial_steps + list(repair_result.get("steps") or [])
+            steps_so_far = combined_steps
+            try:
+                validated = validate_sgr_payload(
+                    str(question.get("level") or ""),
+                    str(question.get("task_subtype") or ""),
+                    _extract_json_object(str(repair_result.get("output") or "")),
+                )
+                return {
+                    "sgr_schema_name": spec.schema_name,
+                    "sgr_payload": validated.model_dump(),
+                    "sgr_validation_status": "validated_after_repair",
+                    "sgr_repair_attempted": True,
+                    "sgr_fallback_used": False,
+                    "steps": combined_steps,
+                    "sgr_error": "",
+                }
+            except Exception:
+                return {
+                    "sgr_schema_name": spec.schema_name,
+                    "sgr_payload": None,
+                    "sgr_validation_status": "fallback_after_repair_failure",
+                    "sgr_repair_attempted": True,
+                    "sgr_fallback_used": True,
+                    "steps": combined_steps,
+                    "sgr_error": "",
+                }
+    except Exception as exc:
+        return {
+            "sgr_schema_name": spec.schema_name,
+            "sgr_payload": None,
+            "sgr_validation_status": "fallback_on_generation_error",
+            "sgr_repair_attempted": False,
+            "sgr_fallback_used": True,
+            "steps": steps_so_far,
+            "sgr_error": str(exc),
+        }
 
 
 def _run_tool_loop(
@@ -451,6 +474,7 @@ def _run_student_with_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
     result["sgr_validation_status"] = sgr_meta.get("sgr_validation_status")
     result["sgr_repair_attempted"] = bool(sgr_meta.get("sgr_repair_attempted"))
     result["sgr_fallback_used"] = bool(sgr_meta.get("sgr_fallback_used"))
+    result["sgr_error"] = str(sgr_meta.get("sgr_error") or "")
     return result
 
 
@@ -467,6 +491,7 @@ def _run_student_without_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
     result["sgr_validation_status"] = "disabled"
     result["sgr_repair_attempted"] = False
     result["sgr_fallback_used"] = False
+    result["sgr_error"] = ""
     return result
 
 

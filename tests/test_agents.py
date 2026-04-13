@@ -760,6 +760,30 @@ class OpenShellWorkerSGRTests(unittest.TestCase):
         self.assertIsNone(result["sgr_payload"])
         self.assertEqual(len(result["steps"]), 3)
 
+    def test_worker_falls_back_when_sgr_generation_raises_runtime_error(self):
+        payload = self._student_payload()
+        spec = mock.Mock(schema_name="sgr_a_reaction_center_identification", template={"level": "A"})
+        with (
+            mock.patch.object(openshell_worker, "get_sgr_schema_spec", return_value=spec),
+            mock.patch.object(
+                openshell_worker,
+                "_run_tool_loop",
+                side_effect=[
+                    RuntimeError("boom"),
+                    {"state": "success", "output": "Answer: ok", "error": "", "steps": [{"step_number": 1}]},
+                ],
+            ),
+        ):
+            result = openshell_worker._run_student_with_sgr(payload)
+
+        self.assertEqual(result["state"], "success")
+        self.assertEqual(result["sgr_validation_status"], "fallback_on_generation_error")
+        self.assertFalse(result["sgr_repair_attempted"])
+        self.assertTrue(result["sgr_fallback_used"])
+        self.assertIsNone(result["sgr_payload"])
+        self.assertEqual(result["sgr_error"], "boom")
+        self.assertEqual(len(result["steps"]), 1)
+
     def test_worker_can_run_without_sgr(self):
         payload = self._student_payload()
         payload["sgr_enabled"] = False
@@ -775,6 +799,30 @@ class OpenShellWorkerSGRTests(unittest.TestCase):
         self.assertEqual(result["sgr_schema_name"], "")
         self.assertFalse(result["sgr_repair_attempted"])
         self.assertFalse(result["sgr_fallback_used"])
+
+    def test_build_client_disables_proxy_env_for_local_api_base(self):
+        model = {
+            "api_base": "http://127.0.0.1:8317/v1",
+            "api_key": "local-key",
+        }
+        with mock.patch.object(openshell_worker, "OpenAI", return_value=object()) as mocked_openai:
+            openshell_worker._build_client(model)
+
+        kwargs = mocked_openai.call_args.kwargs
+        self.assertEqual(kwargs["base_url"], "http://127.0.0.1:8317/v1")
+        self.assertIn("http_client", kwargs)
+
+    def test_build_client_keeps_proxy_defaults_for_remote_api_base(self):
+        model = {
+            "api_base": "https://api.openai.com/v1",
+            "api_key": "remote-key",
+        }
+        with mock.patch.object(openshell_worker, "OpenAI", return_value=object()) as mocked_openai:
+            openshell_worker._build_client(model)
+
+        kwargs = mocked_openai.call_args.kwargs
+        self.assertEqual(kwargs["base_url"], "https://api.openai.com/v1")
+        self.assertNotIn("http_client", kwargs)
 
     def test_student_sgr_prompt_includes_schema_block(self):
         spec = mock.Mock(schema_name="sgr_b_generic", template={"level": "B", "contract_check": {}, "final_answer": {"value": ""}})

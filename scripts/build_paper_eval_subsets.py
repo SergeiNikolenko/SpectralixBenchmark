@@ -223,20 +223,31 @@ def make_level_c_rules() -> list[Rule]:
 
 def write_manifest(counts: dict[str, int]) -> None:
     lines = [
-        "schema_version: paper_eval_v1",
+        "schema_version: paper_eval_v2",
         "files:",
         f"  level_a_eval: {{path: benchmark/level_a_eval.jsonl, records: {counts['A']}}}",
         f"  level_b_eval: {{path: benchmark/level_b_eval.jsonl, records: {counts['B']}}}",
         f"  level_c_eval: {{path: benchmark/level_c_eval.jsonl, records: {counts['C']}}}",
         "selection_policy:",
-        "  level_a: source- and subtype-balanced deterministic sample",
+        "  level_a: legacy source- and subtype-balanced deterministic sample",
         "  level_b: source- and difficulty-balanced deterministic sample",
-        "  level_c: route-source-balanced deterministic sample with pilot tasks kept intact",
+        "  level_c: legacy route-source-balanced deterministic sample with pilot tasks kept intact",
+        "benchmark_taxonomy:",
+        "  core_suites:",
+        "    A: Local Reaction Reasoning",
+        "    B: Single-Step Disconnection Reasoning",
+        "    C: Route-Level Synthesis Planning",
+        "  auxiliary_suite:",
+        "    G: Procedure Grounding",
+        "  notes:",
+        "    - reagent_role_identification and condition_role_identification are reported under G",
+        "    - existing eval subsets are reused; benchmark taxonomy is a reporting and contract overlay",
         "notes:",
         "  - A target size: 420",
         "  - B target size: 420",
         "  - C target size: 150",
         "  - C has no meaningful easy bucket in the current pool, so balancing uses medium/hard only.",
+        "  - New paper-facing aggregation should use nested macro-averaging over A, B, and C.",
     ]
     PAPER_EVAL_MANIFEST.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

@@ -87,7 +87,7 @@ Student mode uses a real schema-level reasoning stage, not prompt-only guidance:
 
 Public benchmark outputs stay unchanged:
 
-- `student_output.jsonl` schema unchanged
+- `student_output.jsonl` enriched with taxonomy and contract metadata
 - Judge interfaces unchanged
 - SGR metadata is exposed only in debug/verbose artifacts
 
@@ -154,8 +154,8 @@ OpenShell SDK client timeout is also raised to at least `1200s`.
 
 ## Compatibility Guarantees
 
-- `student_output.jsonl` schema unchanged
-- `llm_judge_output.jsonl` schema unchanged
+- `student_output.jsonl` enriched with taxonomy and contract metadata
+- `llm_judge_output.jsonl` enriched with taxonomy metadata and used as the primary taxonomy-aware result row format
 - Existing `--model-url` supported
 - Added aliases for operational compatibility:
   - `--api-base-url`

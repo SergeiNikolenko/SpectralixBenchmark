@@ -4,7 +4,7 @@ import json
 import re
 import subprocess
 import math
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 from scripts.agents.models import ensure_chat_completions_url
 from scripts.evaluation.llm_judge import run_llm_judge
 from scripts.evaluation.student_validation import run_benchmark_inference
+from scripts.evaluation.benchmark_taxonomy import compute_benchmark_taxonomy_metrics
 
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 MODEL_LIMIT_ERROR_MARKERS = (
@@ -214,9 +215,14 @@ def _build_skipped_row(model_name: str) -> Dict[str, Any]:
     return {
         "model_name": model_name,
         "total_rows": 0,
-        "quality_total_score": 0.0,
-        "quality_max_score": 0.0,
-        "quality_normalized_score": None,
+        "overall_quality_total_score": 0.0,
+        "overall_quality_max_score": 0.0,
+        "overall_quality_score": None,
+        "overall_end_to_end_score": None,
+        "macro_depth_quality_score": None,
+        "macro_depth_end_to_end_score": None,
+        "auxiliary_grounding_quality_score": None,
+        "auxiliary_grounding_end_to_end_score": None,
         "reliability_ok_count": 0,
         "reliability_ok_rate": None,
         "infra_error_count": {},
@@ -305,10 +311,14 @@ def _build_summary_row(
 def _summary_base_fields(row: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "total_rows": row.get("total_rows"),
-        "quality_total_score": row.get("quality_total_score"),
-        "quality_max_score": row.get("quality_max_score"),
-        "quality_normalized_score": row.get("quality_normalized_score"),
-        "quality_end_to_end_score": row.get("quality_end_to_end_score"),
+        "overall_quality_total_score": row.get("overall_quality_total_score"),
+        "overall_quality_max_score": row.get("overall_quality_max_score"),
+        "overall_quality_score": row.get("overall_quality_score"),
+        "overall_end_to_end_score": row.get("overall_end_to_end_score"),
+        "macro_depth_quality_score": row.get("macro_depth_quality_score"),
+        "macro_depth_end_to_end_score": row.get("macro_depth_end_to_end_score"),
+        "auxiliary_grounding_quality_score": row.get("auxiliary_grounding_quality_score"),
+        "auxiliary_grounding_end_to_end_score": row.get("auxiliary_grounding_end_to_end_score"),
         "student_input_tokens_total": row.get("student_input_tokens_total"),
         "student_output_tokens_total": row.get("student_output_tokens_total"),
         "student_total_tokens_total": row.get("student_total_tokens_total"),
@@ -338,16 +348,16 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     quality_total_score = float(sum(float(row.get("final_score", 0) or 0) for row in quality_rows))
     quality_max_score = float(sum(float(row.get("max_score", 0) or 0) for row in quality_rows))
     end_to_end_max_score = float(sum(float(row.get("max_score", 0) or 0) for row in judge_rows))
-    quality_normalized_score: Optional[float]
+    overall_quality_score: Optional[float]
     if quality_max_score > 0:
-        quality_normalized_score = quality_total_score / quality_max_score
+        overall_quality_score = quality_total_score / quality_max_score
     else:
-        quality_normalized_score = None
-    quality_end_to_end_score: Optional[float]
+        overall_quality_score = None
+    overall_end_to_end_score: Optional[float]
     if end_to_end_max_score > 0:
-        quality_end_to_end_score = quality_total_score / end_to_end_max_score
+        overall_end_to_end_score = quality_total_score / end_to_end_max_score
     else:
-        quality_end_to_end_score = None
+        overall_end_to_end_score = None
 
     judge_input_tokens_total = int(sum(int(row.get("judge_input_tokens") or 0) for row in judge_rows))
     judge_output_tokens_total = int(sum(int(row.get("judge_output_tokens") or 0) for row in judge_rows))
@@ -375,48 +385,7 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         key: value / total_rows for key, value in sorted(infra_counts.items())
     } if total_rows else {}
 
-    breakdown: Dict[str, Dict[str, Any]] = defaultdict(
-        lambda: {
-            "count": 0,
-            "quality_count": 0,
-            "quality_total_score": 0.0,
-            "quality_max_score": 0.0,
-            "ok_count": 0,
-        }
-    )
-
-    for row in judge_rows:
-        answer_type = str(row.get("answer_type", "unknown") or "unknown")
-        bucket = breakdown[answer_type]
-        bucket["count"] += 1
-
-        student_status, row_status = _status_pair(row)
-        if _is_ok_pair(student_status, row_status):
-            bucket["ok_count"] += 1
-
-        if row_status == "ok" and row.get("final_score") is not None:
-            bucket["quality_count"] += 1
-            bucket["quality_total_score"] += float(row.get("final_score", 0) or 0)
-            bucket["quality_max_score"] += float(row.get("max_score", 0) or 0)
-
-    breakdown_by_answer_type: Dict[str, Dict[str, Any]] = {}
-    for answer_type, values in sorted(breakdown.items()):
-        quality_max = float(values["quality_max_score"])
-        if quality_max > 0:
-            quality_norm = float(values["quality_total_score"]) / quality_max
-        else:
-            quality_norm = None
-
-        count = int(values["count"])
-        ok_rate = (int(values["ok_count"]) / count) if count else None
-        breakdown_by_answer_type[answer_type] = {
-            "count": count,
-            "quality_count": int(values["quality_count"]),
-            "quality_total_score": float(values["quality_total_score"]),
-            "quality_max_score": quality_max,
-            "quality_normalized_score": quality_norm,
-            "ok_rate": ok_rate,
-        }
+    taxonomy_metrics = compute_benchmark_taxonomy_metrics(judge_rows)
 
     errors_sample: List[Dict[str, Any]] = []
     for row in judge_rows:
@@ -437,10 +406,10 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     return {
         "total_rows": total_rows,
-        "quality_total_score": quality_total_score,
-        "quality_max_score": quality_max_score,
-        "quality_normalized_score": quality_normalized_score,
-        "quality_end_to_end_score": quality_end_to_end_score,
+        "overall_quality_total_score": quality_total_score,
+        "overall_quality_max_score": quality_max_score,
+        "overall_quality_score": overall_quality_score,
+        "overall_end_to_end_score": overall_end_to_end_score,
         "judge_input_tokens_total": judge_input_tokens_total,
         "judge_output_tokens_total": judge_output_tokens_total,
         "judge_total_tokens_total": judge_total_tokens_total,
@@ -451,8 +420,8 @@ def compute_metrics(judge_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
         "reliability_ok_rate": reliability_ok_rate,
         "infra_error_count": dict(sorted(infra_counts.items())),
         "infra_error_rate": infra_error_rate,
-        "breakdown_by_answer_type": breakdown_by_answer_type,
         "errors_sample": errors_sample,
+        **taxonomy_metrics,
     }
 
 
@@ -470,10 +439,14 @@ def write_summary_csv(path: Path, summary_rows: List[Dict[str, Any]]) -> None:
     fieldnames = [
         "model_name",
         "total_rows",
-        "quality_total_score",
-        "quality_max_score",
-        "quality_normalized_score",
-        "quality_end_to_end_score",
+        "overall_quality_total_score",
+        "overall_quality_max_score",
+        "overall_quality_score",
+        "overall_end_to_end_score",
+        "macro_depth_quality_score",
+        "macro_depth_end_to_end_score",
+        "auxiliary_grounding_quality_score",
+        "auxiliary_grounding_end_to_end_score",
         "student_input_tokens_total",
         "student_output_tokens_total",
         "student_total_tokens_total",
@@ -509,8 +482,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--benchmark-path",
         type=Path,
-        default=Path("benchmark/benchmark_v1_0.jsonl"),
-        help="Path to benchmark JSONL (default: benchmark/benchmark_v1_0.jsonl)",
+        default=Path("benchmark/benchmark_v3_eval.jsonl"),
+        help="Path to benchmark JSONL (default: benchmark/benchmark_v3_eval.jsonl)",
     )
     parser.add_argument(
         "--model-url",
@@ -820,7 +793,12 @@ def main() -> None:
             "status": model_manifest.get("status"),
             "student_rows": model_manifest.get("student_rows"),
             "judge_rows": model_manifest.get("judge_rows"),
-            "quality_normalized_score": model_manifest.get("quality_normalized_score"),
+            "macro_depth_quality_score": model_manifest.get("macro_depth_quality_score"),
+            "macro_depth_end_to_end_score": model_manifest.get("macro_depth_end_to_end_score"),
+            "auxiliary_grounding_quality_score": model_manifest.get("auxiliary_grounding_quality_score"),
+            "auxiliary_grounding_end_to_end_score": model_manifest.get("auxiliary_grounding_end_to_end_score"),
+            "overall_quality_score": model_manifest.get("overall_quality_score"),
+            "overall_end_to_end_score": model_manifest.get("overall_end_to_end_score"),
             "reliability_ok_rate": model_manifest.get("reliability_ok_rate"),
             "model_manifest_path": str(model_manifest_path),
         }
@@ -846,7 +824,10 @@ def main() -> None:
             student_output_path = model_dir / "student_output.jsonl"
             judge_output_path = model_dir / "llm_judge_output.jsonl"
             metrics_path = model_dir / "metrics.json"
-            breakdown_path = model_dir / "breakdown_by_answer_type.json"
+            breakdown_suite_path = model_dir / "breakdown_by_suite.json"
+            breakdown_subtrack_path = model_dir / "breakdown_by_subtrack.json"
+            breakdown_task_mode_path = model_dir / "breakdown_by_task_mode.json"
+            breakdown_planning_horizon_path = model_dir / "breakdown_by_planning_horizon.json"
             errors_sample_path = model_dir / "errors_sample.json"
 
             print(f"[INFO] Running student inference for model={model_name}")
@@ -881,7 +862,10 @@ def main() -> None:
                 "student_output_path": str(student_output_path),
                 "judge_output_path": str(judge_output_path),
                 "metrics_path": str(metrics_path),
-                "breakdown_path": str(breakdown_path),
+                "breakdown_by_suite_path": str(breakdown_suite_path),
+                "breakdown_by_subtrack_path": str(breakdown_subtrack_path),
+                "breakdown_by_task_mode_path": str(breakdown_task_mode_path),
+                "breakdown_by_planning_horizon_path": str(breakdown_planning_horizon_path),
                 "errors_sample_path": str(errors_sample_path),
                 "trace_log_dir": str(trace_log_dir),
                 "verbose_output_path": str(verbose_output_path),
@@ -964,7 +948,10 @@ def main() -> None:
                 )
                 skipped_row = _build_skipped_row(model_name)
                 write_json(metrics_path, skipped_row)
-                write_json(breakdown_path, {})
+                write_json(breakdown_suite_path, {})
+                write_json(breakdown_subtrack_path, {})
+                write_json(breakdown_task_mode_path, {})
+                write_json(breakdown_planning_horizon_path, {})
                 write_json(errors_sample_path, [])
                 summary_rows.append(skipped_row)
                 model_manifest["stages"]["judge"]["status"] = "skipped"
@@ -1086,7 +1073,13 @@ def main() -> None:
             )
 
             write_json(metrics_path, metrics)
-            write_json(breakdown_path, metrics.get("breakdown_by_answer_type") or {})
+            write_json(breakdown_suite_path, metrics.get("breakdown_by_suite") or {})
+            write_json(breakdown_subtrack_path, metrics.get("breakdown_by_subtrack") or {})
+            write_json(breakdown_task_mode_path, metrics.get("breakdown_by_task_mode") or {})
+            write_json(
+                breakdown_planning_horizon_path,
+                metrics.get("breakdown_by_planning_horizon") or {},
+            )
             write_json(
                 errors_sample_path,
                 (metrics.get("errors_sample") or [])[: max(args.error_sample_size, 0)],
@@ -1096,7 +1089,16 @@ def main() -> None:
             model_manifest["status"] = "completed"
             model_manifest["finished_at_utc"] = _now_utc_iso()
             model_manifest["updated_at_utc"] = _now_utc_iso()
-            model_manifest["quality_normalized_score"] = metrics.get("quality_normalized_score")
+            model_manifest["macro_depth_quality_score"] = metrics.get("macro_depth_quality_score")
+            model_manifest["macro_depth_end_to_end_score"] = metrics.get("macro_depth_end_to_end_score")
+            model_manifest["auxiliary_grounding_quality_score"] = metrics.get(
+                "auxiliary_grounding_quality_score"
+            )
+            model_manifest["auxiliary_grounding_end_to_end_score"] = metrics.get(
+                "auxiliary_grounding_end_to_end_score"
+            )
+            model_manifest["overall_quality_score"] = metrics.get("overall_quality_score")
+            model_manifest["overall_end_to_end_score"] = metrics.get("overall_end_to_end_score")
             model_manifest["reliability_ok_rate"] = metrics.get("reliability_ok_rate")
             model_manifest["student_input_tokens_total"] = metrics.get("student_input_tokens_total")
             model_manifest["student_output_tokens_total"] = metrics.get("student_output_tokens_total")
