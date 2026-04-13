@@ -9,7 +9,7 @@ from openai import AsyncOpenAI
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from scripts.agents.models import parse_model_url, resolve_api_key
+from spectralix_benchmark.agents.models import parse_model_url, resolve_api_key
 
 
 def _resolve_model_url(model_url: Optional[str]) -> str:

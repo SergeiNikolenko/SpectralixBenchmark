@@ -1,103 +1,101 @@
 # SpectralixBenchmark
 
-Benchmark and evaluation tooling for chemistry-focused AI systems:
+`SpectralixBenchmark` is a chemistry benchmark and evaluation package for
+agentic language models.
 
-- Organic chemistry tasks
-- Tandem mass spectrometry (MS2) tasks
-- Structured answer evaluation with deterministic + LLM judging
+It is designed to measure performance across increasing planning depth rather
+than as a single mixed chemistry test set.
 
-## Runtime Overview
+## What The Benchmark Measures
 
-Public evaluation runtime:
+`benchmark_v3` is organized as a three-level ladder:
 
-1. `OpenShell` as the sandboxed execution/runtime layer
-2. OpenAI-compatible model access through a local or remote proxy endpoint
-3. `PydanticAI` guard layer for structured validation/repair/retry
+- `Level A`: local reaction understanding
+- `Level B`: single-step retrosynthesis
+- `Level C`: route-level synthesis planning
 
-Primary runtime/config files:
+The repository also includes an auxiliary grounding suite used for chemistry
+role and condition extraction, but the primary paper-facing benchmark is the
+`A/B/C` ladder.
 
-- `scripts/agents/runtime.py`
-- `scripts/agents/openshell_manager.py`
-- `scripts/agents/openshell_worker.py`
-- `scripts/agents/sgr_schemas.py`
-- `scripts/agents/tool_registry.py`
-- `scripts/agents/agent_config.yaml`
-- `scripts/pydantic_guard/*`
+The benchmark covers:
 
-Student inference uses a hidden two-phase flow:
-
-1. Build and validate an internal SGR schema object (`A/B/C` + subtype-specific variants).
-2. Generate the final benchmark-aligned answer using compact validated SGR context.
-
-This keeps the raw student/judge pipeline stable while enriching emitted rows with explicit taxonomy and contract metadata.
+- organic chemistry reasoning
+- retrosynthesis and route planning
+- tandem mass spectrometry (`MS2`) structure tasks
+- deterministic and rubric-based LLM evaluation
 
 ## Repository Layout
 
-- `benchmark/`: materialized evaluation datasets and manifests used by the paper/runtime.
-- `scripts/agents/`: OpenShell runtime, tool registry, and SGR orchestration.
-- `scripts/evaluation/`: student, judge, matrix runner, reporting, and taxonomy helpers.
-- `docs/`: architecture, benchmark semantics, judging, and operational guidance.
-- `external_sources/`: source inventories and manifests used to reconstruct benchmark provenance.
+- `benchmark/`
+  - public benchmark artifacts, eval subsets, and manifests
+- `spectralix_benchmark/agents/`
+  - OpenShell runtime, tool registry, and SGR reasoning layer
+- `spectralix_benchmark/evaluation/`
+  - student stage, judge stage, and matrix runner
+- `spectralix_benchmark/guards/`
+  - typed validation and retry helpers for student and judge calls
+- `spectralix_benchmark/build/`
+  - reproducible benchmark construction utilities
+- `external_sources/`
+  - source manifests, download links, and rebuild instructions
+- `docs/`
+  - architecture, ladder semantics, judging, taxonomy, and runtime policy
 
-The clean repository intentionally excludes generated runs, rescue analyses, and raw parsing assets.
+The public repository intentionally excludes generated runs, scratch analysis,
+and legacy parsing pipelines that are not part of the final benchmark release.
 
-## Benchmark Schema
+## Public Benchmark Files
 
-Primary evaluation entrypoint: materialized `benchmark_v3` eval file
-(`benchmark/benchmark_v3_eval.jsonl`), built from:
+Primary runtime entrypoint:
+
+- `benchmark/benchmark_v3_eval.jsonl`
+
+Per-level public eval subsets:
 
 - `benchmark/level_a_eval.jsonl`
 - `benchmark/level_b_eval.jsonl`
 - `benchmark/level_c_eval.jsonl`
 
-Retained source/compatibility dataset for selected build steps:
-`benchmark/benchmark_v1_0.jsonl`
+Supporting manifests:
 
-```json
-{
-  "exam_id": "string",
-  "page_id": "integer | string",
-  "question_id": "integer | string",
-  "question_type": "string",
-  "question_text": "string",
-  "answer_type": "single_choice | multiple_choice | numeric | ordering | structure | full_synthesis | reaction_description | property_determination | msms_structure_prediction | text",
-  "canonical_answer": "string",
-  "max_score": "integer"
-}
-```
+- `benchmark/levels_manifest.yaml`
+- `benchmark/paper_eval_manifest.yaml`
+- `benchmark/LEVELS.md`
 
-## Prerequisites
+Legacy compatibility/source layer retained for selected construction steps:
 
-- Python 3.12+
+- `benchmark/benchmark_v1_0.jsonl`
+
+## Installation
+
+Requirements:
+
+- Python `3.12+`
 - `uv`
-- Local proxy (OpenAI-compatible) or direct OpenAI-compatible endpoint
-- Docker daemon for local OpenShell gateway deployment
+- Docker for OpenShell-backed runs
+- an OpenAI-compatible endpoint or local proxy
 
-Repository root:
-
-```bash
-cd /path/to/SpectralixBenchmark
-```
-
-Install dependencies:
+Setup:
 
 ```bash
+git clone https://github.com/SergeiNikolenko/SpectralixBenchmark.git
+cd SpectralixBenchmark
 uv sync
 ```
 
-## Environment Setup
+The package is importable as `spectralix_benchmark`.
 
-Example local proxy values:
+## Runtime Setup
 
-- API base URL: `http://127.0.0.1:8317/v1`
-- API key: `<your-api-key>`
+Export your model endpoint and API key:
 
 ```bash
 export API_BASE_URL="http://127.0.0.1:8317/v1"
 export CLIPROXY_API_KEY="<your-api-key>"
 ```
 
-Health check:
+Quick health check:
 
 ```bash
 curl -sS \
@@ -105,25 +103,24 @@ curl -sS \
   "$API_BASE_URL/models"
 ```
 
-If this fails, start your local OpenAI-compatible proxy first. The exact
-startup command depends on your environment and is intentionally not hardcoded in
-this public README.
+If you run OpenShell-backed evaluation, make sure Docker and the OpenShell
+gateway are available.
 
-## Evaluation Quick Start (`benchmark_v3`)
+## Reproducing Benchmark Execution
 
-Materialize the per-level subsets into the runtime-facing benchmark file:
+### 1. Materialize the runtime-facing benchmark file
 
 ```bash
-uv run python -m scripts.evaluation.materialize_benchmark_v3_eval \
+uv run python -m spectralix_benchmark.evaluation.materialize_benchmark_v3_eval \
   --output benchmark/benchmark_v3_eval.jsonl
 ```
 
-### 1) Student smoke run (5 rows)
+### 2. Run student inference
 
 ```bash
-uv run python -m scripts.evaluation.student_validation \
+uv run python -m spectralix_benchmark.evaluation.student_validation \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
-  --output-path scripts/evaluation/student_output.jsonl \
+  --output-path runs/repro/student_output.jsonl \
   --api-base-url "$API_BASE_URL" \
   --model-name "gpt-5.4-mini" \
   --api-key "$CLIPROXY_API_KEY" \
@@ -132,31 +129,28 @@ uv run python -m scripts.evaluation.student_validation \
   --agent-tools-profile tools \
   --student-guard-enabled true \
   --student-guard-mode on_failure \
-  --student-guard-retries 2 \
-  --resume-existing false \
-  --limit 5
+  --student-guard-retries 2
 ```
 
-### 2) Judge run
+### 3. Run the judge
 
 ```bash
-uv run python -m scripts.evaluation.llm_judge \
-  --input-path scripts/evaluation/student_output.jsonl \
+uv run python -m spectralix_benchmark.evaluation.llm_judge \
+  --input-path runs/repro/student_output.jsonl \
   --gold-path benchmark/benchmark_v3_eval.jsonl \
   --judge-model "gpt-5.4-mini" \
   --judge-model-url "$API_BASE_URL" \
   --judge-api-key "$CLIPROXY_API_KEY" \
   --judge-method g_eval \
   --judge-g-eval-fallback-structured true \
-  --resume-existing false \
   --judge-structured-retries 2 \
-  --output-path scripts/evaluation/llm_judge_output.jsonl
+  --output-path runs/repro/llm_judge_output.jsonl
 ```
 
-### 3) Full matrix run
+### 4. Run the full matrix pipeline
 
 ```bash
-uv run python -m scripts.evaluation.run_full_matrix \
+uv run python -m spectralix_benchmark.evaluation.run_full_matrix \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --api-base-url "$API_BASE_URL" \
   --api-key "$CLIPROXY_API_KEY" \
@@ -170,46 +164,48 @@ uv run python -m scripts.evaluation.run_full_matrix \
   --student-guard-retries 2 \
   --judge-method g_eval \
   --judge-g-eval-fallback-structured true \
-  --resume-existing false \
   --judge-structured-retries 2
 ```
 
-## Optional Parsing Utilities
+Outputs are written into `runs/<run-id>/`.
 
-`scripts/parsing/` contains optional reconstruction helpers for working from
-external raw exam PDFs. Raw parser inputs, parser iterations, and intermediate
-outputs are intentionally not versioned in this repository.
+## Rebuilding The Benchmark From Sources
 
-## Runtime Notes
+The repository does not redistribute raw external datasets. To rebuild the
+larger benchmark pools:
 
-- `--agent-sandbox openshell` is the recommended runtime for benchmark-integrity
-  runs.
-- `--agent-sandbox local` is a development fallback only.
-- Tool access is controlled through `scripts/agents/agent_config.yaml`.
-- Detailed timeout, sandbox, and security behavior is documented in
-  `docs/security_runbook.md`.
+1. download the public sources listed in [external_sources/README.md](external_sources/README.md)
+2. place them into the expected `external_sources/<group>/<source>/raw|extracted` layout
+3. run:
 
-## Additional Docs
+```bash
+uv run python -m spectralix_benchmark.build.level_benchmark_files
+uv run python -m spectralix_benchmark.build.paper_eval_subsets
+uv run python -m spectralix_benchmark.evaluation.materialize_benchmark_v3_eval \
+  --output benchmark/benchmark_v3_eval.jsonl
+```
 
-- Evaluation details: `scripts/evaluation/README.md`
-- Parsing details: `scripts/parsing/README.md`
-- Architecture: `docs/architecture.md`
-- Security controls: `docs/security_runbook.md`
+Restricted/commercial sources are documented in `external_sources/blocked/` but
+are not redistributed.
 
-## Judge Output Notes
+## Evaluation Notes
 
-- `score_method` in `llm_judge_output.jsonl` explicitly indicates score source:
+- The default integrity-oriented runtime is `OpenShell`.
+- `local` sandbox mode is a development fallback, not the preferred evaluation mode.
+- The student path includes a hidden SGR reasoning phase for supported runs.
+- The judge combines deterministic scoring with rubric-based LLM evaluation.
+- `score_method` in `llm_judge_output.jsonl` records whether a row was scored by:
   - `deterministic`
   - `g_eval`
   - `structured_fallback`
   - `llm_judge`
-- With `--judge-g-eval-fallback-structured true`, open-ended rows can fall back
-  from `g_eval` to structured judge when needed.
 
-## Contacts
+## Documentation Map
 
-Maintainer (Innopolis University — AI Lab in Chemistry):
-
-- Ivan Golov
-- Email: `i.golov@innopolis.university`
-- Telegram: [https://t.me/Ione_Golov](https://t.me/Ione_Golov)
+- [docs/architecture.md](docs/architecture.md) - runtime and package structure
+- [docs/benchmark_ladder.md](docs/benchmark_ladder.md) - benchmark semantics
+- [docs/benchmark_construction.md](docs/benchmark_construction.md) - source-to-benchmark construction
+- [docs/benchmark_taxonomy.md](docs/benchmark_taxonomy.md) - taxonomy and reporting
+- [docs/g_eval.md](docs/g_eval.md) - judge behavior
+- [docs/tools/README.md](docs/tools/README.md) - operational commands
+- [docs/security_runbook.md](docs/security_runbook.md) - runtime and sandbox policy

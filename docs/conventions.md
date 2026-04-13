@@ -13,8 +13,8 @@
   files as materialized benchmark artifacts.
 - Do not hand-edit generated benchmark JSONL files.
 - Use builder scripts for reproducible regeneration:
-  - `scripts/build_level_benchmark_files.py`
-  - `scripts/build_paper_eval_subsets.py`
+  - `spectralix_benchmark/build/level_benchmark_files.py`
+  - `spectralix_benchmark/build/paper_eval_subsets.py`
 - Keep deterministic subset selection behavior stable across runs.
 
 ## Schema Conventions

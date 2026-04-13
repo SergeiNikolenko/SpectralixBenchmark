@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_DIR = REPO_ROOT / "benchmark"
 
 LEVEL_A_POOL = BENCHMARK_DIR / "level_a.jsonl"

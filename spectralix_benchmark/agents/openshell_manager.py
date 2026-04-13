@@ -38,7 +38,7 @@ class OpenShellManager:
         "uv.lock",
         "benchmark",
         "docs",
-        "scripts",
+        "spectralix_benchmark",
         "tests",
     )
 
@@ -217,7 +217,7 @@ class OpenShellManager:
 
         result = self._client_for_gateway().exec(
             self._handle.sandbox_id,
-            ["/sandbox/.venv/bin/python", "-m", "scripts.agents.openshell_worker"],
+            ["/sandbox/.venv/bin/python", "-m", "spectralix_benchmark.agents.openshell_worker"],
             workdir="/sandbox",
             stdin=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             timeout_seconds=timeout_seconds,
@@ -248,7 +248,7 @@ class OpenShellManager:
 
         result = self._client_for_gateway().exec(
             self._handle.sandbox_id,
-            ["/sandbox/.venv/bin/python", "-m", "scripts.agents.codex_native_worker"],
+            ["/sandbox/.venv/bin/python", "-m", "spectralix_benchmark.agents.codex_native_worker"],
             workdir="/sandbox",
             stdin=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             timeout_seconds=timeout_seconds,

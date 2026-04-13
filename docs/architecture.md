@@ -26,7 +26,7 @@
 - Runs student inference + judge across multiple models
 - Produces per-model metrics and run summary artifacts
 
-## Agent Layer (`scripts/agents/`)
+## Agent Layer (`spectralix_benchmark/agents/`)
 
 - `config.py`
   - Default config
@@ -45,7 +45,7 @@
   - Security-aware tool enablement (allowlist, network-tool gating)
 
 - `prompts.py`
-  - Student/parser task prompt builders
+  - Student task prompt builders
   - Hidden SGR prompt builder for structured reasoning phase
 
 - `runtime.py`
@@ -91,7 +91,7 @@ Public benchmark outputs stay unchanged:
 - Judge interfaces unchanged
 - SGR metadata is exposed only in debug/verbose artifacts
 
-## Guard Layer (`scripts/pydantic_guard/`)
+## Guard Layer (`spectralix_benchmark/guards/`)
 
 - `models.py`
   - OpenAI-compatible model builder for PydanticAI
@@ -103,8 +103,6 @@ Public benchmark outputs stay unchanged:
   - rubric-guided G-Eval judge execution + retry
 - `student_guard.py`
   - Answer-format validation + guard repair execution
-- `parser_repair.py`
-  - Structured parser output repair into schema-valid question lists
 - `retry.py`
   - Shared retry helper for guard calls
 

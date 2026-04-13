@@ -94,7 +94,7 @@ Use these manifests as source of truth:
 
 - `benchmark/levels_manifest.yaml`
 - `benchmark/paper_eval_manifest.yaml`
-- taxonomy overlay: `scripts/evaluation/benchmark_taxonomy.py`
+- taxonomy overlay: `spectralix_benchmark/evaluation/benchmark_taxonomy.py`
 
 `levels_manifest.yaml` documents the generated large-pool layer used during
 benchmark construction. Those pool files are not tracked in the public

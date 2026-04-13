@@ -35,15 +35,15 @@ judging for synthesis-style answers.
 
 The implementation is split across a small set of files:
 
-- `scripts/evaluation/run_full_matrix.py`
+- `spectralix_benchmark/evaluation/run_full_matrix.py`
   - selects `g_eval` as the default judge mode
-- `scripts/evaluation/llm_judge.py`
+- `spectralix_benchmark/evaluation/llm_judge.py`
   - routes rows between deterministic scoring and LLM judging
-- `scripts/evaluation/judge_rubrics.py`
+- `spectralix_benchmark/evaluation/judge_rubrics.py`
   - defines rubric templates and answer-type-specific criteria
-- `scripts/pydantic_guard/judge_geval.py`
+- `spectralix_benchmark/guards/judge_geval.py`
   - runs the rubric-guided model call and validates the result
-- `scripts/pydantic_guard/schemas.py`
+- `spectralix_benchmark/guards/schemas.py`
   - contains the structured response schema (`GEvalJudgeResult`)
 
 ## Routing Semantics
@@ -63,7 +63,7 @@ Deterministic scoring is used for exact or mostly exact answer types such as:
 - `property_determination`
 - `full_synthesis`
 
-This split is implemented in `scripts/evaluation/llm_judge.py`.
+This split is implemented in `spectralix_benchmark/evaluation/llm_judge.py`.
 
 ## Structured Judge Output
 
@@ -131,7 +131,7 @@ This makes judge decisions substantially easier to debug than a free-form
 However, rubric selection still remains code-driven today:
 
 - benchmark rows define the task, gold answer, and metadata
-- `scripts/evaluation/judge_rubrics.py` still defines the rubric logic
+- `spectralix_benchmark/evaluation/judge_rubrics.py` still defines the rubric logic
 
 In other words, the benchmark data exposes the intended contract, but the
 current judge implementation is still primarily controlled by code rather than

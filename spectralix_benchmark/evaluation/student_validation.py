@@ -10,9 +10,9 @@ import sys
 
 from tqdm import tqdm
 
-from scripts.agents import AgentRuntime, AgentRuntimeError
-from scripts.agents.models import ensure_chat_completions_url
-from scripts.pydantic_guard.student_guard import is_answer_invalid, run_student_guard
+from spectralix_benchmark.agents import AgentRuntime, AgentRuntimeError
+from spectralix_benchmark.agents.models import ensure_chat_completions_url
+from spectralix_benchmark.guards.student_guard import is_answer_invalid, run_student_guard
 
 STATUS_OK = "ok"
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
@@ -866,7 +866,7 @@ def run_benchmark_inference(
     agent_sandbox: str = "openshell",
     agent_backend: Optional[str] = None,
     agent_tools_profile: str = "minimal",
-    agent_config: Optional[Path] = Path("scripts/agents/agent_config.yaml"),
+    agent_config: Optional[Path] = Path("spectralix_benchmark/agents/agent_config.yaml"),
     agent_reasoning_effort: Optional[str] = None,
     agent_sgr_enabled: bool = True,
     api_key: Optional[str] = None,
@@ -1181,8 +1181,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--agent-config",
         type=Path,
-        default=Path("scripts/agents/agent_config.yaml"),
-        help="Path to agent YAML config (default: scripts/agents/agent_config.yaml)",
+        default=Path("spectralix_benchmark/agents/agent_config.yaml"),
+        help="Path to agent YAML config (default: spectralix_benchmark/agents/agent_config.yaml)",
     )
     parser.add_argument(
         "--agent-reasoning-effort",

@@ -21,13 +21,13 @@ uv sync
 Rebuild large benchmark pools:
 
 ```bash
-uv run python scripts/build_level_benchmark_files.py
+uv run python -m spectralix_benchmark.build.level_benchmark_files
 ```
 
 Rebuild paper eval subsets:
 
 ```bash
-uv run python scripts/build_paper_eval_subsets.py
+uv run python -m spectralix_benchmark.build.paper_eval_subsets
 ```
 
 ## Smoke Runs
@@ -35,9 +35,9 @@ uv run python scripts/build_paper_eval_subsets.py
 Smoke student stage on the materialized `benchmark_v3` eval set:
 
 ```bash
-uv run python -m scripts.evaluation.student_validation \
+uv run python -m spectralix_benchmark.evaluation.student_validation \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
-  --output-path scripts/evaluation/student_output_smoke.jsonl \
+  --output-path runs/smoke/student_output.jsonl \
   --api-base-url "$API_BASE_URL" \
   --model-name "gpt-5.4-mini" \
   --api-key "$CLIPROXY_API_KEY" \
@@ -53,8 +53,8 @@ uv run python -m scripts.evaluation.student_validation \
 Run judge with rubric-based `g_eval`:
 
 ```bash
-uv run python -m scripts.evaluation.llm_judge \
-  --input-path scripts/evaluation/student_output.jsonl \
+uv run python -m spectralix_benchmark.evaluation.llm_judge \
+  --input-path runs/smoke/student_output.jsonl \
   --gold-path benchmark/benchmark_v3_eval.jsonl \
   --judge-model "gpt-5.4-mini" \
   --judge-model-url "$API_BASE_URL" \
@@ -62,12 +62,12 @@ uv run python -m scripts.evaluation.llm_judge \
   --judge-method g_eval \
   --judge-g-eval-fallback-structured true \
   --judge-structured-retries 2 \
-  --output-path scripts/evaluation/llm_judge_output.jsonl
+  --output-path runs/smoke/llm_judge_output.jsonl
 ```
 
 ## Current Tool Profiles
 
-Configured in `scripts/agents/agent_config.yaml`:
+Configured in `spectralix_benchmark/agents/agent_config.yaml`:
 
 - `minimal`: no local tools
 - `tools`: `chem_python_tool`, `workspace_list_tool`, `workspace_read_tool`, `shell_exec_tool`, `uv_run_tool`
@@ -83,7 +83,7 @@ Notes:
 ## Full Matrix (OpenShell + Tools)
 
 ```bash
-uv run python -m scripts.evaluation.run_full_matrix \
+uv run python -m spectralix_benchmark.evaluation.run_full_matrix \
   --benchmark-path benchmark/benchmark_v3_eval.jsonl \
   --api-base-url "$API_BASE_URL" \
   --api-key "$CLIPROXY_API_KEY" \
@@ -101,7 +101,7 @@ uv run python -m scripts.evaluation.run_full_matrix \
 For implementation details:
 
 - `docs/g_eval.md`
-- `scripts/evaluation/README.md`
+- `docs/architecture.md`
 
 ## Validation Helpers
 

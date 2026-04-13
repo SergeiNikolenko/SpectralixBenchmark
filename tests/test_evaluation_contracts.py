@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from scripts.evaluation import student_validation as student_validation_module
-from scripts.evaluation import run_full_matrix as run_full_matrix_module
+from spectralix_benchmark.evaluation import student_validation as student_validation_module
+from spectralix_benchmark.evaluation import run_full_matrix as run_full_matrix_module
 
 EXPECTED_STUDENT_OUTPUT_KEYS = {
     "exam_id",

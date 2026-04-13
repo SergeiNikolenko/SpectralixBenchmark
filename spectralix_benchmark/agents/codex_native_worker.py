@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 
-from .prompts import build_parse_page_task, build_student_task
+from .prompts import build_student_task
 
 
 def _codex_home_dir(payload: Dict[str, Any]) -> str:
@@ -24,8 +24,6 @@ def _build_prompt(payload: Dict[str, Any]) -> str:
     mode = str(payload.get("mode") or "").strip().lower()
     if mode == "student":
         return build_student_task(payload["question"])
-    if mode == "parser":
-        raise RuntimeError("native Codex backend does not support parser mode")
     raise RuntimeError(f"Unsupported worker mode: {mode}")
 
 

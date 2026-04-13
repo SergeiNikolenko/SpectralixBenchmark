@@ -1,11 +1,7 @@
-import json
-import tempfile
 import unittest
-from pathlib import Path
 
-from scripts.evaluation.migrate_run_artifacts import migrate_run_dir
-from scripts.evaluation.materialize_benchmark_v3_eval import _to_contract_row
-from scripts.evaluation.benchmark_taxonomy import (
+from spectralix_benchmark.evaluation.materialize_benchmark_v3_eval import _to_contract_row
+from spectralix_benchmark.evaluation.benchmark_taxonomy import (
     compute_benchmark_taxonomy_metrics,
     get_benchmark_taxonomy_metadata,
 )
@@ -101,92 +97,6 @@ class BenchmarkTaxonomyTests(unittest.TestCase):
         self.assertIsNone(metrics["macro_depth_quality_score"])
         self.assertAlmostEqual(metrics["macro_depth_end_to_end_score"], (0.5 + 0.25 + 0.0) / 3)
         self.assertEqual(metrics["auxiliary_grounding_quality_score"], 0.75)
-
-    def test_migrate_run_dir_writes_taxonomy_artifacts(self):
-        row = {
-            "exam_id": "benchmark_v3_a",
-            "page_id": "source_eval",
-            "question_id": "row-1",
-            "level": "A",
-            "task_subtype": "mechanistic_classification",
-            "difficulty": "medium",
-            "answer_type": "reaction_description",
-            "max_score": 2,
-            "final_score": 1.2,
-            "student_status": "ok",
-            "row_status": "ok",
-        }
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            run_dir = Path(tmp_dir) / "run_1"
-            model_dir = run_dir / "demo-model"
-            model_dir.mkdir(parents=True)
-            with (model_dir / "llm_judge_output.jsonl").open("w", encoding="utf-8") as handle:
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            with (model_dir / "student_output.jsonl").open("w", encoding="utf-8") as handle:
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            with (model_dir / "student_output_verbose.jsonl").open("w", encoding="utf-8") as handle:
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            write_json = {
-                "verbose_output_path": str(model_dir / "student_output_verbose.jsonl"),
-            }
-            (model_dir / "run_manifest.json").write_text(
-                json.dumps(write_json, ensure_ascii=False),
-                encoding="utf-8",
-            )
-
-            summary_rows = migrate_run_dir(run_dir)
-
-            self.assertEqual(len(summary_rows), 1)
-            self.assertTrue((model_dir / "metrics.json").exists())
-            self.assertTrue((model_dir / "breakdown_by_suite.json").exists())
-            self.assertTrue((model_dir / "breakdown_by_subtrack.json").exists())
-            self.assertTrue((model_dir / "breakdown_by_task_subtype.json").exists())
-            self.assertTrue((run_dir / "summary.json").exists())
-            enriched_rows = [
-                json.loads(line)
-                for line in (model_dir / "llm_judge_output.jsonl").read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            enriched_student_rows = [
-                json.loads(line)
-                for line in (model_dir / "student_output.jsonl").read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            self.assertEqual(enriched_rows[0]["benchmark_suite"], "A")
-            self.assertEqual(enriched_rows[0]["benchmark_subtrack"], "A2")
-            self.assertEqual(enriched_student_rows[0]["benchmark_suite"], "A")
-            self.assertEqual(enriched_student_rows[0]["benchmark_subtrack"], "A2")
-
-    def test_migrate_run_dir_drops_stale_verbose_output_path(self):
-        row = {
-            "exam_id": "benchmark_v3_a",
-            "page_id": "source_eval",
-            "question_id": "row-1",
-            "level": "A",
-            "task_subtype": "mechanistic_classification",
-            "difficulty": "medium",
-            "answer_type": "reaction_description",
-            "max_score": 2,
-            "final_score": 1.2,
-            "student_status": "ok",
-            "row_status": "ok",
-        }
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            run_dir = Path(tmp_dir) / "run_1"
-            model_dir = run_dir / "demo-model"
-            model_dir.mkdir(parents=True)
-            with (model_dir / "llm_judge_output.jsonl").open("w", encoding="utf-8") as handle:
-                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            (model_dir / "run_manifest.json").write_text(
-                json.dumps({"verbose_output_path": str(model_dir / "missing_verbose.jsonl")}),
-                encoding="utf-8",
-            )
-
-            migrate_run_dir(run_dir)
-
-            manifest = json.loads((model_dir / "run_manifest.json").read_text(encoding="utf-8"))
-            self.assertNotIn("verbose_output_path", manifest)
-
 
 class TaxonomyMetadataTests(unittest.TestCase):
     def test_unknown_subtype_falls_back_to_generic_level(self):

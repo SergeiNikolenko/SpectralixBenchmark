@@ -7,19 +7,19 @@ from unittest import mock
 
 from pydantic import ValidationError
 
-from scripts.agents import openshell_worker
-from scripts.agents.config import build_executor_kwargs, load_agent_config, resolve_runtime_backend
-from scripts.agents.models import ensure_chat_completions_url, parse_model_url, sandbox_visible_api_base
-from scripts.agents.prompts import build_parse_page_task, build_student_sgr_task, build_student_task
-from scripts.agents.runtime import AgentRuntime
-from scripts.agents.sgr_schemas import (
+from spectralix_benchmark.agents import openshell_worker
+from spectralix_benchmark.agents.config import build_executor_kwargs, load_agent_config, resolve_runtime_backend
+from spectralix_benchmark.agents.models import ensure_chat_completions_url, parse_model_url, sandbox_visible_api_base
+from spectralix_benchmark.agents.prompts import build_student_sgr_task, build_student_task
+from spectralix_benchmark.agents.runtime import AgentRuntime
+from spectralix_benchmark.agents.sgr_schemas import (
     GenericASchema,
     GenericBSchema,
     MechanisticClassificationSchema,
     ReferenceRoutePlanningSchema,
     select_sgr_schema,
 )
-from scripts.agents.tool_registry import (
+from spectralix_benchmark.agents.tool_registry import (
     build_tools,
     safe_http_get_tool,
     workspace_list_tool,
@@ -123,7 +123,7 @@ class ToolPolicyTests(unittest.TestCase):
 
 class ConfigTests(unittest.TestCase):
     def test_missing_config_file_raises(self):
-        missing = Path("scripts/agents/does_not_exist.yaml")
+        missing = Path("spectralix_benchmark/agents/does_not_exist.yaml")
         with self.assertRaises(FileNotFoundError):
             load_agent_config(config_path=missing)
 
@@ -325,7 +325,7 @@ class WorkspaceToolTests(unittest.TestCase):
         runtime.close()
 
     def test_runtime_metadata_exposes_network_tools_when_enabled(self):
-        config_path = Path("scripts/agents/_test_network_true.yaml")
+        config_path = Path("spectralix_benchmark/agents/_test_network_true.yaml")
         config_path.write_text(
             "\n".join(
                 [
@@ -434,19 +434,6 @@ class PromptSecurityTests(unittest.TestCase):
         self.assertIn("Do not use tools to look for hidden metadata", prompt)
         self.assertIn("Chemistry validation: chem_python_tool", prompt)
         self.assertIn("Workspace inspection/editing: workspace_read_tool", prompt)
-
-    def test_parser_prompt_includes_extraction_contract(self):
-        prompt = build_parse_page_task(
-            exam_id="exam_7",
-            page_id=4,
-            marker_prompt="Extract all questions.",
-            image_path="/tmp/page.png",
-        )
-        self.assertIn("<task>", prompt)
-        self.assertIn("<extraction_rules>", prompt)
-        self.assertIn("Do not invent missing fields.", prompt)
-        self.assertIn("return []", prompt)
-
 
 class SGRSchemaTests(unittest.TestCase):
     def test_selector_prefers_subtype_specific_schema(self):

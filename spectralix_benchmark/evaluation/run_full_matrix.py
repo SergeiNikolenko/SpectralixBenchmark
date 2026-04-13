@@ -5,14 +5,14 @@ import re
 import subprocess
 import math
 from collections import Counter
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from scripts.agents.models import ensure_chat_completions_url
-from scripts.evaluation.llm_judge import run_llm_judge
-from scripts.evaluation.student_validation import run_benchmark_inference
-from scripts.evaluation.benchmark_taxonomy import compute_benchmark_taxonomy_metrics
+from spectralix_benchmark.agents.models import ensure_chat_completions_url
+from spectralix_benchmark.evaluation.llm_judge import run_llm_judge
+from spectralix_benchmark.evaluation.student_validation import run_benchmark_inference
+from spectralix_benchmark.evaluation.benchmark_taxonomy import compute_benchmark_taxonomy_metrics
 
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 MODEL_LIMIT_ERROR_MARKERS = (
@@ -45,7 +45,7 @@ DEFAULT_PRICING_USD_PER_1M: Dict[str, Dict[str, float]] = {
 
 
 def _now_utc_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _detect_git_commit(repo_dir: Path) -> Optional[str]:
@@ -599,7 +599,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--agent-config",
         type=Path,
-        default=Path("scripts/agents/agent_config.yaml"),
+        default=Path("spectralix_benchmark/agents/agent_config.yaml"),
         help="Path to agent config YAML",
     )
     parser.add_argument(

@@ -6,10 +6,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-from scripts.evaluation.judge_rubrics import get_g_eval_spec
-from scripts.evaluation.benchmark_taxonomy import get_benchmark_taxonomy_metadata
-from scripts.pydantic_guard.judge_geval import run_g_eval_judge
-from scripts.pydantic_guard.judge_structured import run_structured_judge
+from spectralix_benchmark.evaluation.judge_rubrics import get_g_eval_spec
+from spectralix_benchmark.evaluation.benchmark_taxonomy import get_benchmark_taxonomy_metadata
+from spectralix_benchmark.guards.judge_geval import run_g_eval_judge
+from spectralix_benchmark.guards.judge_structured import run_structured_judge
 
 DETERMINISTIC_TYPES = {
     "single_choice",

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import base64
 import json
 import logging
 import shutil
@@ -13,7 +12,6 @@ import sys
 from .config import build_executor_kwargs, load_agent_config, resolve_runtime_backend
 from .models import ModelSettings, build_model_settings
 from .openshell_manager import OpenShellManager, OpenShellManagerError
-from .prompts import build_parse_page_task, build_student_task
 from .tool_registry import build_tool_definitions
 
 
@@ -93,27 +91,6 @@ class AgentRuntime:
         }
         result = self._run_payload(payload)
         return str(result.get("output") or "").strip()
-
-    def parse_page(self, image_path: str, exam_id: str, page_id: int, marker_prompt: str) -> str:
-        image_bytes = Path(image_path).read_bytes()
-        payload = {
-            "mode": "parser",
-            "exam_id": exam_id,
-            "page_id": page_id,
-            "marker_prompt": marker_prompt,
-            "image_path": image_path,
-            "image_base64": base64.b64encode(image_bytes).decode("ascii"),
-            "model": self._payload_model_settings(),
-            "config": self.config,
-            "tools_profile": "minimal",
-            "max_steps": self.max_steps,
-            "workspace_root": self._payload_workspace_root(),
-            "uv_bin": self._payload_uv_bin(),
-        }
-        result = self._run_payload(payload)
-        raw = str(result.get("output") or "").strip()
-        parsed_array = self._extract_json_array(raw)
-        return json.dumps(parsed_array, ensure_ascii=False)
 
     def preflight(self) -> None:
         if self._preflight_done:
@@ -214,7 +191,7 @@ class AgentRuntime:
 
     def _run_local_worker(self, payload: Dict[str, Any], *, timeout_seconds: int) -> Dict[str, Any]:
         process = subprocess.run(
-            [sys.executable, "-m", "scripts.agents.openshell_worker"],
+            [sys.executable, "-m", "spectralix_benchmark.agents.openshell_worker"],
             cwd=str(self.workspace_dir),
             input=json.dumps(payload, ensure_ascii=False),
             capture_output=True,
@@ -228,25 +205,6 @@ class AgentRuntime:
                 message=(process.stderr or process.stdout or "local worker failed").strip()[:240],
             )
         return json.loads((process.stdout or "").strip() or "{}")
-
-    def _extract_json_array(self, raw: str) -> List[Dict[str, Any]]:
-        payload = (raw or "").strip()
-        if not payload:
-            raise AgentRuntimeError(status="parse_error", message="Parser agent returned empty output")
-
-        payload = payload.replace("```json", "").replace("```", "").strip()
-
-        try:
-            parsed: Any = json.loads(payload)
-        except json.JSONDecodeError as exc:
-            raise AgentRuntimeError(status="parse_error", message=f"Parser JSON extraction failed: {exc}") from exc
-
-        if not isinstance(parsed, list):
-            raise AgentRuntimeError(status="parse_error", message="Parser output JSON is not an array")
-        for idx, item in enumerate(parsed):
-            if not isinstance(item, dict):
-                raise AgentRuntimeError(status="parse_error", message=f"Parser output item {idx} is not an object")
-        return parsed
 
     @staticmethod
     def _classify_error(error: Exception) -> str:

@@ -68,11 +68,6 @@ STUDENT_SGR_COMPLETION_RULES = (
     "- Do not omit required fields and do not replace structured fields with prose."
 )
 
-PARSER_AGENT_INSTRUCTION = (
-    "You are a document parsing agent for chemistry exam pages. "
-    "Return only a JSON array of parsed questions and never include markdown fences."
-)
-
 DEFAULT_FORMAT_INSTRUCTION = (
     "Start the response with 'Answer: <machine-readable answer>'. "
     "If needed, add a very short explanation after that line."
@@ -346,31 +341,4 @@ def build_student_task(
         "<question>\n"
         f"{prompt_context['question_text']}\n"
         "</question>"
-    )
-
-
-def build_parse_page_task(exam_id: str, page_id: int, marker_prompt: str, image_path: str) -> str:
-    return (
-        "<role>\n"
-        f"{PARSER_AGENT_INSTRUCTION}\n"
-        "</role>\n\n"
-        "<task>\n"
-        "Extract every question visible on the page into a valid JSON array.\n"
-        "</task>\n\n"
-        "<page_context>\n"
-        f"Exam ID: {exam_id}\n"
-        f"Page ID: {page_id}\n"
-        f"Image path: {image_path}\n"
-        "</page_context>\n\n"
-        "<extraction_rules>\n"
-        "Follow this extraction specification exactly:\n"
-        f"{marker_prompt}\n\n"
-        "Preserve source wording when possible.\n"
-        "Do not invent missing fields.\n"
-        "If the page has no questions, return [].\n"
-        "</extraction_rules>\n\n"
-        "<completion_criteria>\n"
-        "Validate the JSON with available validation tool before finalizing.\n"
-        "Output only a valid JSON array and nothing else.\n"
-        "</completion_criteria>"
     )

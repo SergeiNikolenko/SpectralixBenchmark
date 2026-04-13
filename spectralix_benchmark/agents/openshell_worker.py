@@ -5,13 +5,12 @@ import json
 import os
 import sys
 import time
-import base64
 from urllib.parse import urlparse
 
 import httpx
 from openai import OpenAI
 
-from .prompts import build_parse_page_task, build_student_sgr_task, build_student_task
+from .prompts import build_student_sgr_task, build_student_task
 from .sgr_schemas import compact_sgr_payload, get_sgr_schema_spec, schema_template_lines, validate_sgr_payload
 from .tool_registry import build_tool_definitions
 
@@ -493,36 +492,6 @@ def _run_student_without_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
     result["sgr_fallback_used"] = False
     result["sgr_error"] = ""
     return result
-
-
-def _parser_messages(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    image_bytes = base64.b64decode(payload["image_base64"])
-    image_url = "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")
-    return [
-        {"role": "system", "content": "You parse chemistry exam pages accurately and return strict JSON arrays only."},
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": build_parse_page_task(
-                        exam_id=str(payload["exam_id"]),
-                        page_id=int(payload["page_id"]),
-                        marker_prompt=str(payload["marker_prompt"]),
-                        image_path=str(payload.get("image_path") or ""),
-                    ),
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": image_url,
-                    },
-                },
-            ],
-        },
-    ]
-
-
 def _main() -> int:
     payload = json.loads(sys.stdin.read() or "{}")
     mode = str(payload.get("mode") or "").strip().lower()
@@ -532,8 +501,6 @@ def _main() -> int:
             result = _run_student_with_sgr(payload)
         else:
             result = _run_student_without_sgr(payload)
-    elif mode == "parser":
-        result = _run_tool_loop(payload=payload, messages=_parser_messages(payload))
     else:
         raise ValueError(f"Unsupported worker mode: {mode}")
 

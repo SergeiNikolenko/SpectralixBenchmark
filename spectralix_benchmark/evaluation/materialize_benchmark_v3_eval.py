@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-from scripts.evaluation.benchmark_taxonomy import get_benchmark_taxonomy_metadata
+from spectralix_benchmark.evaluation.benchmark_taxonomy import get_benchmark_taxonomy_metadata
 
 
 DEFAULT_INPUTS = [

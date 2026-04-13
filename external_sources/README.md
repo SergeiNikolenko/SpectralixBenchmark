@@ -69,9 +69,9 @@ After downloading the required public sources into the expected layout:
 Commands:
 
 ```bash
-uv run python scripts/build_level_benchmark_files.py
-uv run python scripts/build_paper_eval_subsets.py
-uv run python -m scripts.evaluation.materialize_benchmark_v3_eval \
+uv run python -m spectralix_benchmark.build.level_benchmark_files
+uv run python -m spectralix_benchmark.build.paper_eval_subsets
+uv run python -m spectralix_benchmark.evaluation.materialize_benchmark_v3_eval \
   --output benchmark/benchmark_v3_eval.jsonl
 ```
 
