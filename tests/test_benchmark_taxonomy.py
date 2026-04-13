@@ -86,6 +86,18 @@ class BenchmarkTaxonomyTests(unittest.TestCase):
         self.assertAlmostEqual(metrics["breakdown_by_suite"]["B"]["quality_score"], 0.25)
         self.assertAlmostEqual(metrics["breakdown_by_suite"]["G"]["quality_score"], 0.75)
         self.assertAlmostEqual(metrics["breakdown_by_suite"]["C"]["end_to_end_score"], 0.0)
+        self.assertAlmostEqual(
+            metrics["breakdown_by_task_subtype"]["reaction_center_identification"][
+                "quality_score"
+            ],
+            0.5,
+        )
+        self.assertAlmostEqual(
+            metrics["breakdown_by_task_subtype"]["reagent_role_identification"][
+                "quality_score"
+            ],
+            0.75,
+        )
         self.assertIsNone(metrics["macro_depth_quality_score"])
         self.assertAlmostEqual(metrics["macro_depth_end_to_end_score"], (0.5 + 0.25 + 0.0) / 3)
         self.assertEqual(metrics["auxiliary_grounding_quality_score"], 0.75)
@@ -110,6 +122,17 @@ class BenchmarkTaxonomyTests(unittest.TestCase):
             model_dir.mkdir(parents=True)
             with (model_dir / "llm_judge_output.jsonl").open("w", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            with (model_dir / "student_output.jsonl").open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            with (model_dir / "student_output_verbose.jsonl").open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            write_json = {
+                "verbose_output_path": str(model_dir / "student_output_verbose.jsonl"),
+            }
+            (model_dir / "run_manifest.json").write_text(
+                json.dumps(write_json, ensure_ascii=False),
+                encoding="utf-8",
+            )
 
             summary_rows = migrate_run_dir(run_dir)
 
@@ -117,14 +140,52 @@ class BenchmarkTaxonomyTests(unittest.TestCase):
             self.assertTrue((model_dir / "metrics.json").exists())
             self.assertTrue((model_dir / "breakdown_by_suite.json").exists())
             self.assertTrue((model_dir / "breakdown_by_subtrack.json").exists())
+            self.assertTrue((model_dir / "breakdown_by_task_subtype.json").exists())
             self.assertTrue((run_dir / "summary.json").exists())
             enriched_rows = [
                 json.loads(line)
                 for line in (model_dir / "llm_judge_output.jsonl").read_text(encoding="utf-8").splitlines()
                 if line.strip()
             ]
+            enriched_student_rows = [
+                json.loads(line)
+                for line in (model_dir / "student_output.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
             self.assertEqual(enriched_rows[0]["benchmark_suite"], "A")
             self.assertEqual(enriched_rows[0]["benchmark_subtrack"], "A2")
+            self.assertEqual(enriched_student_rows[0]["benchmark_suite"], "A")
+            self.assertEqual(enriched_student_rows[0]["benchmark_subtrack"], "A2")
+
+    def test_migrate_run_dir_drops_stale_verbose_output_path(self):
+        row = {
+            "exam_id": "benchmark_v3_a",
+            "page_id": "source_eval",
+            "question_id": "row-1",
+            "level": "A",
+            "task_subtype": "mechanistic_classification",
+            "difficulty": "medium",
+            "answer_type": "reaction_description",
+            "max_score": 2,
+            "final_score": 1.2,
+            "student_status": "ok",
+            "row_status": "ok",
+        }
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            run_dir = Path(tmp_dir) / "run_1"
+            model_dir = run_dir / "demo-model"
+            model_dir.mkdir(parents=True)
+            with (model_dir / "llm_judge_output.jsonl").open("w", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            (model_dir / "run_manifest.json").write_text(
+                json.dumps({"verbose_output_path": str(model_dir / "missing_verbose.jsonl")}),
+                encoding="utf-8",
+            )
+
+            migrate_run_dir(run_dir)
+
+            manifest = json.loads((model_dir / "run_manifest.json").read_text(encoding="utf-8"))
+            self.assertNotIn("verbose_output_path", manifest)
 
 
 class TaxonomyMetadataTests(unittest.TestCase):

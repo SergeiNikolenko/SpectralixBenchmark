@@ -826,6 +826,7 @@ def main() -> None:
             metrics_path = model_dir / "metrics.json"
             breakdown_suite_path = model_dir / "breakdown_by_suite.json"
             breakdown_subtrack_path = model_dir / "breakdown_by_subtrack.json"
+            breakdown_task_subtype_path = model_dir / "breakdown_by_task_subtype.json"
             breakdown_task_mode_path = model_dir / "breakdown_by_task_mode.json"
             breakdown_planning_horizon_path = model_dir / "breakdown_by_planning_horizon.json"
             errors_sample_path = model_dir / "errors_sample.json"
@@ -864,6 +865,7 @@ def main() -> None:
                 "metrics_path": str(metrics_path),
                 "breakdown_by_suite_path": str(breakdown_suite_path),
                 "breakdown_by_subtrack_path": str(breakdown_subtrack_path),
+                "breakdown_by_task_subtype_path": str(breakdown_task_subtype_path),
                 "breakdown_by_task_mode_path": str(breakdown_task_mode_path),
                 "breakdown_by_planning_horizon_path": str(breakdown_planning_horizon_path),
                 "errors_sample_path": str(errors_sample_path),
@@ -950,6 +952,7 @@ def main() -> None:
                 write_json(metrics_path, skipped_row)
                 write_json(breakdown_suite_path, {})
                 write_json(breakdown_subtrack_path, {})
+                write_json(breakdown_task_subtype_path, {})
                 write_json(breakdown_task_mode_path, {})
                 write_json(breakdown_planning_horizon_path, {})
                 write_json(errors_sample_path, [])
@@ -1075,6 +1078,10 @@ def main() -> None:
             write_json(metrics_path, metrics)
             write_json(breakdown_suite_path, metrics.get("breakdown_by_suite") or {})
             write_json(breakdown_subtrack_path, metrics.get("breakdown_by_subtrack") or {})
+            write_json(
+                breakdown_task_subtype_path,
+                metrics.get("breakdown_by_task_subtype") or {},
+            )
             write_json(breakdown_task_mode_path, metrics.get("breakdown_by_task_mode") or {})
             write_json(
                 breakdown_planning_horizon_path,

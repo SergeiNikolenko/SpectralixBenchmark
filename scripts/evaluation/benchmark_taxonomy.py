@@ -313,6 +313,7 @@ def compute_benchmark_taxonomy_metrics(judge_rows: List[Mapping[str, Any]]) -> D
 
     breakdown_by_suite = _bucketize(overlay_rows, "benchmark_suite")
     breakdown_by_subtrack = _bucketize(overlay_rows, "benchmark_subtrack")
+    breakdown_by_task_subtype = _bucketize(overlay_rows, "task_subtype")
     breakdown_by_task_mode = _bucketize(overlay_rows, "task_mode")
     breakdown_by_planning_horizon = _bucketize(overlay_rows, "planning_horizon")
 
@@ -341,6 +342,7 @@ def compute_benchmark_taxonomy_metrics(judge_rows: List[Mapping[str, Any]]) -> D
         ),
         "breakdown_by_suite": breakdown_by_suite,
         "breakdown_by_subtrack": breakdown_by_subtrack,
+        "breakdown_by_task_subtype": breakdown_by_task_subtype,
         "breakdown_by_task_mode": breakdown_by_task_mode,
         "breakdown_by_planning_horizon": breakdown_by_planning_horizon,
     }

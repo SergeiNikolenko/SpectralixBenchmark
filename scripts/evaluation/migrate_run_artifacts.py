@@ -40,7 +40,28 @@ def _iter_model_dirs(run_dir: Path) -> Iterable[Path]:
             yield child
 
 
+def _rewrite_jsonl_if_present(path: Path) -> None:
+    if not path.exists():
+        return
+    rows = [overlay_benchmark_taxonomy_fields(row) for row in read_jsonl(path)]
+    write_jsonl(path, rows)
+
+
+def _normalize_verbose_output_path(model_dir: Path, manifest: Dict[str, Any]) -> None:
+    verbose_path = manifest.get("verbose_output_path")
+    canonical_path = model_dir / "student_output_verbose.jsonl"
+    if canonical_path.exists():
+        manifest["verbose_output_path"] = str(canonical_path)
+        return
+    if verbose_path and Path(str(verbose_path)).exists():
+        return
+    manifest.pop("verbose_output_path", None)
+
+
 def migrate_model_dir(model_dir: Path) -> Dict[str, Any]:
+    _rewrite_jsonl_if_present(model_dir / "student_output.jsonl")
+    _rewrite_jsonl_if_present(model_dir / "student_output_verbose.jsonl")
+
     judge_path = model_dir / "llm_judge_output.jsonl"
     judge_rows = [overlay_benchmark_taxonomy_fields(row) for row in read_jsonl(judge_path)]
     write_jsonl(judge_path, judge_rows)
@@ -72,6 +93,10 @@ def migrate_model_dir(model_dir: Path) -> Dict[str, Any]:
     write_json(metrics_path, metrics)
     write_json(model_dir / "breakdown_by_suite.json", metrics.get("breakdown_by_suite") or {})
     write_json(model_dir / "breakdown_by_subtrack.json", metrics.get("breakdown_by_subtrack") or {})
+    write_json(
+        model_dir / "breakdown_by_task_subtype.json",
+        metrics.get("breakdown_by_task_subtype") or {},
+    )
     write_json(model_dir / "breakdown_by_task_mode.json", metrics.get("breakdown_by_task_mode") or {})
     write_json(
         model_dir / "breakdown_by_planning_horizon.json",
@@ -84,6 +109,9 @@ def migrate_model_dir(model_dir: Path) -> Dict[str, Any]:
         manifest["metrics_path"] = str(metrics_path)
         manifest["breakdown_by_suite_path"] = str(model_dir / "breakdown_by_suite.json")
         manifest["breakdown_by_subtrack_path"] = str(model_dir / "breakdown_by_subtrack.json")
+        manifest["breakdown_by_task_subtype_path"] = str(
+            model_dir / "breakdown_by_task_subtype.json"
+        )
         manifest["breakdown_by_task_mode_path"] = str(model_dir / "breakdown_by_task_mode.json")
         manifest["breakdown_by_planning_horizon_path"] = str(
             model_dir / "breakdown_by_planning_horizon.json"
@@ -102,6 +130,7 @@ def migrate_model_dir(model_dir: Path) -> Dict[str, Any]:
         manifest["overall_quality_score"] = metrics.get("overall_quality_score")
         manifest["overall_end_to_end_score"] = metrics.get("overall_end_to_end_score")
         manifest["reliability_ok_rate"] = metrics.get("reliability_ok_rate")
+        _normalize_verbose_output_path(model_dir, manifest)
         write_json(model_manifest_path, manifest)
 
     return {

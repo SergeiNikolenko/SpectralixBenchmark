@@ -49,6 +49,14 @@ Auxiliary reporting:
 - `auxiliary_grounding_quality_score = G_quality`
 - `auxiliary_grounding_end_to_end_score = G_e2e`
 
+Primary breakdown artifacts:
+
+- `breakdown_by_suite`
+- `breakdown_by_subtrack`
+- `breakdown_by_task_subtype`
+- `breakdown_by_task_mode`
+- `breakdown_by_planning_horizon`
+
 ## Compatibility
 
 - Legacy `level` and `answer_type` fields remain unchanged for runtime compatibility.
