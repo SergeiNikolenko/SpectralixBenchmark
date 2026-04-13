@@ -1,0 +1,218 @@
+=== TRACE METADATA ===
+{
+  "exam_id": "benchmark_v3_c",
+  "page_id": "paroutes_n1",
+  "question_id": "paroutes_n1_02741",
+  "answer_type": "full_synthesis",
+  "model_name": "gpt-5.4-mini",
+  "student_status": "sandbox_error",
+  "student_error": "OpenShell worker failed with exit_code=1: Traceback (most recent call last):\n  File \"<frozen runpy>\", line 198, in _run_module_as_main\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"/sandbox/scripts/agents/openshell_worker.py\", line",
+  "student_elapsed_ms": 7637,
+  "runtime_metadata": {
+    "executor_type": "openshell",
+    "runtime_backend": "openshell_worker",
+    "tools_profile": "tools",
+    "requested_local_tools": [
+      "chem_format_tool",
+      "smiles_sanity_tool",
+      "unit_convert_tool",
+      "rubric_hint_tool",
+      "json_array_validate_tool",
+      "chem_python_tool",
+      "workspace_list_tool",
+      "workspace_read_tool",
+      "workspace_write_tool",
+      "shell_exec_tool",
+      "uv_run_tool"
+    ],
+    "configured_local_tools": [
+      "chem_format_tool",
+      "smiles_sanity_tool",
+      "unit_convert_tool",
+      "rubric_hint_tool",
+      "json_array_validate_tool",
+      "chem_python_tool",
+      "workspace_list_tool",
+      "workspace_read_tool",
+      "workspace_write_tool",
+      "shell_exec_tool",
+      "uv_run_tool"
+    ],
+    "allow_network_tools": false,
+    "allowed_tool_hosts": [
+      "127.0.0.1",
+      "localhost",
+      "api.openai.com",
+      "openrouter.ai",
+      "api.together.xyz"
+    ],
+    "model_api_base": "https://inference.local/v1",
+    "managed_inference": true,
+    "sandbox_runtime": "openshell"
+  },
+  "tool_usage_summary": {
+    "step_count": 0,
+    "steps_with_tool_calls": 0,
+    "tool_call_count": 0,
+    "tool_names": [],
+    "network_tool_names": []
+  }
+}
+
+=== QUESTION TEXT ===
+Propose a multi-step synthesis route for the target molecule.
+
+Use the structured benchmark context below as the full task specification.
+Return the best chemistry answer grounded only in this context.
+
+<benchmark_context>
+{
+  "level": "C",
+  "task_family": "Multi-Step Synthesis Planning",
+  "task_subtype": "reference_route_planning",
+  "difficulty": "medium",
+  "coverage_tags": [
+    "route_depth",
+    "branch_handling",
+    "convergence",
+    "reference_route"
+  ],
+  "input": {
+    "target": "CCCc1c(OC)ccc2cc(C(=O)OCC)c(=O)oc12"
+  }
+}
+</benchmark_context>
+
+=== REASONING SUMMARY ===
+<empty>
+
+=== STEP SUMMARY ===
+<empty>
+
+=== AGENT RUN DETAILS ===
+<empty>
+
+=== AGENT STDOUT/STDERR TRACE ===
+Agent runtime task failed with status=sandbox_error
+Traceback (most recent call last):
+  File "/Users/nikolenko/.codex/worktrees/43ae/SpectralixBenchmark/scripts/agents/runtime.py", line 183, in _run_payload
+    result = self._openshell_manager.exec_worker(payload=payload, timeout_seconds=worker_timeout)
+  File "/Users/nikolenko/.codex/worktrees/43ae/SpectralixBenchmark/scripts/agents/openshell_manager.py", line 233, in exec_worker
+    raise OpenShellManagerError(
+        f"OpenShell worker failed with exit_code={result.exit_code}: {stderr or 'unknown error'}"
+    )
+scripts.agents.openshell_manager.OpenShellManagerError: OpenShell worker failed with exit_code=1: Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/sandbox/scripts/agents/openshell_worker.py", line 293, in <module>
+    raise SystemExit(_main())
+                     ~~~~~^^
+  File "/sandbox/scripts/agents/openshell_worker.py", line 281, in _main
+    result = _run_tool_loop(payload=payload, messages=_student_messages(payload))
+  File "/sandbox/scripts/agents/openshell_worker.py", line 154, in _run_tool_loop
+    response = _chat_completion_with_retry(
+        client=client,
+    ...<2 lines>...
+        tool_definitions=tool_definitions,
+    )
+  File "/sandbox/scripts/agents/openshell_worker.py", line 112, in _chat_completion_with_retry
+    return _chat_completion(
+        client=client,
+    ...<2 lines>...
+        tool_definitions=tool_definitions,
+    )
+  File "/sandbox/scripts/agents/openshell_worker.py", line 92, in _chat_completion
+    return client.chat.completions.create(**kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/sandbox/.venv/lib/python3.13/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/sandbox/.venv/lib/python3.13/site-packages/openai/resources/chat/completions/completions.py", line 1211, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/sandbox/.venv/lib/python3.13/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/sandbox/.venv/lib/python3.13/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.InternalServerError: Error code: 500 - {'error': {'message': 'Post "https://chatgpt.com/backend-api/codex/responses": dial tcp: lookup chatgpt.com: no such host', 'type': 'server_error', 'code': 'internal_server_error'}}
+[ERROR] Line 858: status=sandbox_error error=OpenShell worker failed with exit_code=1: Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/sandbox/scripts/agents/openshell_worker.py", line
+
+=== RAW MODEL ANSWER ===
+<empty>
+
+=== NORMALIZED STUDENT ANSWER ===
+<empty>
+
+=== JUDGE RESULT ===
+{
+  "line_idx": 858,
+  "judge_mode": "technical_skip",
+  "judge_contract_variant": "technical_skip_v1",
+  "judge_fallback_from": null,
+  "judge_fallback_to": null,
+  "row_status": "sandbox_error",
+  "score_method": null,
+  "judge_model": null,
+  "llm_score": null,
+  "final_score": null,
+  "max_score": 4.0,
+  "judge_latency_ms": null,
+  "judge_request_id": null,
+  "judge_input_tokens": null,
+  "judge_output_tokens": null,
+  "judge_total_tokens": null,
+  "judge_reasoning_tokens": null,
+  "judge_requests": null,
+  "judge_tool_calls": null,
+  "llm_comment": "Technical skip: student_status=sandbox_error"
+}
+
+=== JUDGE INPUT SNAPSHOT ===
+{
+  "answer_type": "full_synthesis",
+  "question_text_preview": "Propose a multi-step synthesis route for the target molecule. Use the structured benchmark context below as the full task specification. Return the best chemistry answer grounded only in this context. <benchmark_context> { \"level\": \"C\", \"task_family\": \"Multi-Step Synthesis Planning\", \"task_subtype\": \"reference_route_planning\", \"difficulty\": \"medium\", \"coverage_tags\": [ \"route_depth\", \"branch_ha...",
+  "student_answer_preview": "",
+  "canonical_answer_preview": "{\"branching_reaction_nodes\": 1, \"reaction_steps\": 3, \"reference_route\": {\"children\": [{\"children\": [{\"children\": [{\"children\": [{\"children\": [{\"children\": [{\"in_stock\": true, \"smiles\": \"C=CCOc1cc(OC)ccc1C=O\", \"type\": \"mol\"}], \"metadata\": {\"ID\": \"US20100144729A1;0068;892366\", \"RingBreaker\": false,..."
+}
+
+=== JUDGE RESULT ===
+{
+  "line_idx": 858,
+  "judge_mode": "technical_skip",
+  "judge_contract_variant": "technical_skip_v1",
+  "judge_fallback_from": null,
+  "judge_fallback_to": null,
+  "row_status": "sandbox_error",
+  "score_method": null,
+  "judge_model": null,
+  "llm_score": null,
+  "final_score": null,
+  "max_score": 4.0,
+  "judge_latency_ms": null,
+  "judge_request_id": null,
+  "judge_input_tokens": null,
+  "judge_output_tokens": null,
+  "judge_total_tokens": null,
+  "judge_reasoning_tokens": null,
+  "judge_requests": null,
+  "judge_tool_calls": null,
+  "llm_comment": "Technical skip: student_status=sandbox_error"
+}
+
+=== JUDGE INPUT SNAPSHOT ===
+{
+  "answer_type": "full_synthesis",
+  "question_text_preview": "Propose a multi-step synthesis route for the target molecule. Use the structured benchmark context below as the full task specification. Return the best chemistry answer grounded only in this context. <benchmark_context> { \"level\": \"C\", \"task_family\": \"Multi-Step Synthesis Planning\", \"task_subtype\": \"reference_route_planning\", \"difficulty\": \"medium\", \"coverage_tags\": [ \"route_depth\", \"branch_ha...",
+  "student_answer_preview": "",
+  "canonical_answer_preview": "{\"branching_reaction_nodes\": 1, \"reaction_steps\": 3, \"reference_route\": {\"children\": [{\"children\": [{\"children\": [{\"children\": [{\"children\": [{\"children\": [{\"in_stock\": true, \"smiles\": \"C=CCOc1cc(OC)ccc1C=O\", \"type\": \"mol\"}], \"metadata\": {\"ID\": \"US20100144729A1;0068;892366\", \"RingBreaker\": false,..."
+}

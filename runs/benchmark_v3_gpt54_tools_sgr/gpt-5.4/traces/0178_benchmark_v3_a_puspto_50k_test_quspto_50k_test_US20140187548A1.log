@@ -1,0 +1,248 @@
+=== TRACE METADATA ===
+{
+  "exam_id": "benchmark_v3_a",
+  "page_id": "uspto_50k_test",
+  "question_id": "uspto_50k_test_US20140187548A1",
+  "answer_type": "reaction_description",
+  "model_name": "gpt-5.4",
+  "student_status": "ok",
+  "student_error": "",
+  "student_elapsed_ms": 18143,
+  "runtime_metadata": {
+    "executor_type": "local",
+    "runtime_backend": "local_worker",
+    "tools_profile": "tools",
+    "requested_local_tools": [
+      "chem_python_tool",
+      "workspace_list_tool",
+      "workspace_read_tool",
+      "shell_exec_tool",
+      "uv_run_tool"
+    ],
+    "configured_local_tools": [
+      "chem_python_tool",
+      "workspace_list_tool",
+      "workspace_read_tool",
+      "shell_exec_tool",
+      "uv_run_tool"
+    ],
+    "allow_network_tools": false,
+    "allowed_tool_hosts": [
+      "127.0.0.1",
+      "localhost",
+      "api.openai.com",
+      "openrouter.ai",
+      "api.together.xyz"
+    ],
+    "model_api_base": "http://127.0.0.1:8317/v1",
+    "managed_inference": false,
+    "sandbox_runtime": "local_worker"
+  },
+  "tool_usage_summary": {
+    "step_count": 3,
+    "steps_with_tool_calls": 0,
+    "tool_call_count": 0,
+    "tool_names": [],
+    "network_tool_names": []
+  }
+}
+
+=== QUESTION TEXT ===
+Identify the transformation class for the reaction and report the major product.
+
+Use the structured benchmark context below as the full task specification.
+Return the best chemistry answer grounded only in this context.
+
+<benchmark_context>
+{
+  "level": "A",
+  "task_family": "Reaction Understanding",
+  "task_subtype": "transformation_classification",
+  "difficulty": "easy",
+  "coverage_tags": [
+    "transformation_type",
+    "major_product"
+  ],
+  "input": {
+    "reaction_smiles": "[CH3:23][C:24]([CH3:25])([OH:26])[CH2:27][NH2:28].[c:1]1([Br:29])[c:2]2[n:3][cH:4][c:5](-[c:6]3[cH:7][cH:8][c:9]([C:10](=[O:11])[NH:12][CH:13]4[CH2:14][CH2:15]4)[cH:16][cH:17]3)[n:18]2[cH:19][c:20]([Br:21])[n:22]1>>[c:1]1([NH:28][CH2:27][C:24]([CH3:23])([CH3:25])[OH:26])[c:2]2[n:3][cH:4][c:5](-[c:6]3[cH:7][cH:8][c:9]([C:10](=[O:11])[NH:12][CH:13]4[CH2:14][CH2:15]4)[cH:16][cH:17]3)[n:18]2[cH:19][c:20]([Br:21])[n:22]1",
+    "reactants": "[CH3:23][C:24]([CH3:25])([OH:26])[CH2:27][NH2:28].[c:1]1([Br:29])[c:2]2[n:3][cH:4][c:5](-[c:6]3[cH:7][cH:8][c:9]([C:10](=[O:11])[NH:12][CH:13]4[CH2:14][CH2:15]4)[cH:16][cH:17]3)[n:18]2[cH:19][c:20]([Br:21])[n:22]1",
+    "reagents": "",
+    "products": "[c:1]1([NH:28][CH2:27][C:24]([CH3:23])([CH3:25])[OH:26])[c:2]2[n:3][cH:4][c:5](-[c:6]3[cH:7][cH:8][c:9]([C:10](=[O:11])[NH:12][CH:13]4[CH2:14][CH2:15]4)[cH:16][cH:17]3)[n:18]2[cH:19][c:20]([Br:21])[n:22]1"
+  }
+}
+</benchmark_context>
+
+=== REASONING SUMMARY ===
+{
+  "step_count": 3,
+  "thoughts": [],
+  "provider_reasoning_summaries": [],
+  "reasoning_tokens_total": 155,
+  "note": "Best-effort summary from visible traces only. Hidden provider chain-of-thought is not exposed."
+}
+
+=== STEP SUMMARY ===
+Step 1 | duration_ms=8961 | reasoning_tokens=121
+  Thought: { "level": "A", "task_subtype": "transformation_classification", "input_parse": { "reactants": [ "2-amino-2-methylpropan-1-ol", "brominated azaheteroaryl substrate" ], "products": [ "azaheteroaryl substrate bearing NHCH2C(CH3)2OH in place of one aryl bromide" ] }, "transformation_schema": { "key_functional_group_change": "heteroaryl bromide to heteroaryl amino substituent", "key_bond_change": "formation of C(heteroaryl)-N bond with loss of Br", "local_transformation_pattern": "nucleophilic ar...
+Step 2 | duration_ms=6107 | reasoning_tokens=18
+  Thought: {"level":"A","task_subtype":"transformation_classification","input_parse":{"reactants":"2-amino-2-methylpropan-1-ol + brominated azaheteroaryl substrate","products":"azaheteroaryl substrate bearing NHCH2C(CH3)2OH in place of one aryl bromide"},"transformation_schema":{"key_functional_group_change":"heteroaryl bromide to heteroaryl amino substituent","key_bond_change":"formation of C(heteroaryl)-N bond with loss of Br","local_transformation_pattern":"nucleophilic aromatic substitution (SNAr) o...
+Step 3 | duration_ms=2509 | reasoning_tokens=16
+  Thought: SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH.
+
+=== SGR SCHEMA ===
+{
+  "sgr_schema_name": "sgr_a_transformation_classification",
+  "sgr_validation_status": "validated_after_repair",
+  "sgr_repair_attempted": true,
+  "sgr_fallback_used": false,
+  "sgr_snapshot": {
+    "level": "A",
+    "task_subtype": "transformation_classification",
+    "contract_check": {
+      "answer_matches_requested_task": true,
+      "answer_matches_requested_depth": true,
+      "answer_matches_exact_benchmark_contract": true,
+      "broader_or_alternative_answer_leak": false,
+      "one_label_only": true,
+      "label_matches_local_change": true
+    },
+    "final_answer": {
+      "value": "SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH."
+    }
+  }
+}
+
+=== SGR CONTRACT CHECK ===
+{
+  "answer_matches_requested_task": true,
+  "answer_matches_requested_depth": true,
+  "answer_matches_exact_benchmark_contract": true,
+  "broader_or_alternative_answer_leak": false,
+  "one_label_only": true,
+  "label_matches_local_change": true
+}
+
+=== SGR FINAL ANSWER CANDIDATE ===
+{
+  "value": "SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH."
+}
+
+=== AGENT RUN DETAILS ===
+{
+  "state": "success",
+  "output_preview": "SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH.",
+  "sgr_schema_name": "sgr_a_transformation_classification",
+  "sgr_validation_status": "validated_after_repair",
+  "sgr_repair_attempted": true,
+  "sgr_fallback_used": false,
+  "sgr_payload": {
+    "level": "A",
+    "task_subtype": "transformation_classification",
+    "contract_check": {
+      "answer_matches_requested_task": true,
+      "answer_matches_requested_depth": true,
+      "answer_matches_exact_benchmark_contract": true,
+      "broader_or_alternative_answer_leak": false,
+      "one_label_only": true,
+      "label_matches_local_change": true
+    },
+    "final_answer": {
+      "value": "SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH."
+    }
+  },
+  "step_count": 3,
+  "steps": [
+    {
+      "step_number": 1,
+      "duration_ms": 8961,
+      "thought": "{ \"level\": \"A\", \"task_subtype\": \"transformation_classification\", \"input_parse\": { \"reactants\": [ \"2-amino-2-methylpropan-1-ol\", \"brominated azaheteroaryl substrate\" ], \"products\": [ \"azaheteroaryl substrate bearing NHCH2C(CH3)2OH in place of one aryl bromide\" ] }, \"transformation_schema\": { \"key_functional_group_change\": \"heteroaryl bromide to heteroaryl amino substituent\", \"key_bond_change\": \"formation of C(heteroaryl)-N bond with loss of Br\", \"local_transformation_pattern\": \"nucleophilic ar...",
+      "code": "",
+      "tool_calls": [],
+      "observations_preview": "",
+      "model_output_preview": "",
+      "error": "",
+      "reasoning_tokens": 121,
+      "is_final_answer": false
+    },
+    {
+      "step_number": 2,
+      "duration_ms": 6107,
+      "thought": "{\"level\":\"A\",\"task_subtype\":\"transformation_classification\",\"input_parse\":{\"reactants\":\"2-amino-2-methylpropan-1-ol + brominated azaheteroaryl substrate\",\"products\":\"azaheteroaryl substrate bearing NHCH2C(CH3)2OH in place of one aryl bromide\"},\"transformation_schema\":{\"key_functional_group_change\":\"heteroaryl bromide to heteroaryl amino substituent\",\"key_bond_change\":\"formation of C(heteroaryl)-N bond with loss of Br\",\"local_transformation_pattern\":\"nucleophilic aromatic substitution (SNAr) o...",
+      "code": "",
+      "tool_calls": [],
+      "observations_preview": "",
+      "model_output_preview": "",
+      "error": "",
+      "reasoning_tokens": 18,
+      "is_final_answer": false
+    },
+    {
+      "step_number": 3,
+      "duration_ms": 2509,
+      "thought": "SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH.",
+      "code": "",
+      "tool_calls": [],
+      "observations_preview": "",
+      "model_output_preview": "",
+      "error": "",
+      "reasoning_tokens": 16,
+      "is_final_answer": false
+    }
+  ]
+}
+
+=== AGENT STDOUT/STDERR TRACE ===
+<empty>
+
+=== RAW MODEL ANSWER ===
+SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH.
+
+=== NORMALIZED STUDENT ANSWER ===
+SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH.
+
+=== JUDGE RESULT ===
+{
+  "line_idx": 178,
+  "judge_mode": "g_eval",
+  "judge_contract_variant": "g_eval_rubric_0_10_v1",
+  "judge_fallback_from": null,
+  "judge_fallback_to": null,
+  "row_status": "ok",
+  "score_method": "g_eval",
+  "judge_model": "gpt-5.4-mini",
+  "llm_score": 0.9,
+  "final_score": 1.8,
+  "max_score": 2.0,
+  "judge_latency_ms": 3637,
+  "judge_request_id": null,
+  "judge_input_tokens": 1400,
+  "judge_output_tokens": 331,
+  "judge_total_tokens": 1731,
+  "judge_reasoning_tokens": 102,
+  "judge_requests": 1,
+  "judge_tool_calls": 0,
+  "llm_comment": "Correct transformation and product match the benchmark. Only minor imprecision is that the exact class label is not stated in benchmark terms."
+}
+
+=== JUDGE INPUT SNAPSHOT ===
+{
+  "answer_type": "reaction_description",
+  "question_text_preview": "Identify the transformation class for the reaction and report the major product. Use the structured benchmark context below as the full task specification. Return the best chemistry answer grounded only in this context. <benchmark_context> { \"level\": \"A\", \"task_family\": \"Reaction Understanding\", \"task_subtype\": \"transformation_classification\", \"difficulty\": \"easy\", \"coverage_tags\": [ \"transform...",
+  "student_answer_preview": "SNAr amination; major product is the mono-substituted azaheteroaryl amine where one bromine is replaced by -NHCH2C(CH3)2OH.",
+  "canonical_answer_preview": "{\"major_product\": \"[c:1]1([NH:28][CH2:27][C:24]([CH3:23])([CH3:25])[OH:26])[c:2]2[n:3][cH:4][c:5](-[c:6]3[cH:7][cH:8][c:9]([C:10](=[O:11])[NH:12][CH:13]4[CH2:14][CH2:15]4)[cH:16][cH:17]3)[n:18]2[cH:19][c:20]([Br:21])[n:22]1\", \"reaction_center\": null, \"reaction_class\": \"1\", \"transformation_type\": ..."
+}
+
+=== JUDGE DETAILS ===
+{
+  "criteria_steps": [
+    "Identify the requested local transformation/class and the major product from the benchmark.",
+    "Check whether the student answered the same local reaction rather than a broader or different transformation.",
+    "Assess chemical plausibility and whether the essential product outcome matches the canonical answer without contradictions."
+  ],
+  "step_findings": [
+    "The benchmark asks for a specific transformation classification: class_1 / transformation_type class_1, with mono-substitution of one brominated heteroaryl site by the amino alcohol fragment.",
+    "The student correctly identifies an SNAr amination and gives the correct mono-substituted product description; this matches the canonical product pattern of replacing one bromine with -NHCH2C(CH3)2OH.",
+    "The answer is chemically plausible and contains the essential local outcome; minor imprecision is that it says 'one bromine' generically, but that does not contradict the benchmark."
+  ],
+  "rubric_score_0_to_10": 9
+}
