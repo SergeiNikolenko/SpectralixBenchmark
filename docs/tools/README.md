@@ -103,6 +103,19 @@ Configured in `spectralix_benchmark/agents/agent_config.yaml`:
 - `tools_internet`: same as `tools` plus `safe_http_get_tool` (only when network tools are enabled)
 - `full`: includes `workspace_write_tool` in addition to `tools` set
 
+## OpenShell Inference Override
+
+If an OpenShell sandbox cannot resolve `inference.local`, you can bypass managed inference
+for the student runtime and connect directly to the upstream OpenAI-compatible endpoint that
+is visible from inside the sandbox:
+
+```bash
+export SPECTRALIX_OPENSHELL_DIRECT_UPSTREAM=true
+```
+
+Use this only as an operational fallback for environments where the managed `inference.local`
+route is broken.
+
 Notes:
 
 - `tools` is the default practical profile for OpenShell runs.

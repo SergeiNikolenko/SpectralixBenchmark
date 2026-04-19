@@ -77,6 +77,11 @@ def _sandbox_host(hostname: str) -> str:
     return hostname
 
 
+def _env_truthy(name: str) -> bool:
+    value = (os.getenv(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def sandbox_visible_api_base(model_url: str) -> str:
     parsed = urlparse(parse_model_url(model_url)[0])
     host = _sandbox_host(parsed.hostname or "")
@@ -104,7 +109,11 @@ def build_model_settings(
     api_base = sandbox_visible_api_base(model_url) if sandbox_visible else parse_model_url(model_url)[0]
     upstream_api_base = sandbox_visible_api_base(model_url) if sandbox_visible else None
     if sandbox_visible:
-        api_base = OPEN_SHELL_MANAGED_INFERENCE_BASE
+        if _env_truthy("SPECTRALIX_OPENSHELL_DIRECT_UPSTREAM"):
+            api_base = sandbox_visible_api_base(model_url)
+            upstream_api_base = None
+        else:
+            api_base = OPEN_SHELL_MANAGED_INFERENCE_BASE
     return ModelSettings(
         model_name=model_name,
         api_base=api_base,
