@@ -1,0 +1,67 @@
+model:
+  temperature: 0.2
+  max_tokens: 4096
+  requests_per_minute: 0
+  reasoning_effort: low
+runtime:
+  backend: openshell_worker
+  add_base_tools: true
+  use_structured_outputs_internally: true
+  code_block_tags: markdown
+  additional_authorized_imports:
+  - math
+  - statistics
+  - json
+  - re
+  - collections
+  - itertools
+  - pathlib
+  - typing
+  - rdkit
+security:
+  allowed_tool_hosts:
+  - 127.0.0.1
+  - localhost
+  - api.openai.com
+  - openrouter.ai
+  - api.together.xyz
+  allow_network_tools: false
+  enforce_container_network_isolation: true
+sandbox:
+  executor_type: openshell
+  openshell:
+    gateway_name: spectralix
+    gateway_port: 18080
+    gateway_plaintext: true
+    auto_start_gateway: true
+    sandbox_name: spectralix-runtime
+    sandbox_from: base
+    ready_timeout_seconds: 180
+    delete_on_close: false
+tools:
+  profiles:
+    no_tools: []
+    tools:
+    - chem_python_tool
+    - workspace_list_tool
+    - workspace_read_tool
+    - shell_exec_tool
+    - uv_run_tool
+    tools_internet:
+    - chem_python_tool
+    - workspace_list_tool
+    - workspace_read_tool
+    - shell_exec_tool
+    - uv_run_tool
+    - safe_http_get_tool
+    minimal: []
+    full:
+    - chem_python_tool
+    - workspace_list_tool
+    - workspace_read_tool
+    - workspace_write_tool
+    - shell_exec_tool
+    - uv_run_tool
+  mcp:
+    enabled: false
+    servers: []

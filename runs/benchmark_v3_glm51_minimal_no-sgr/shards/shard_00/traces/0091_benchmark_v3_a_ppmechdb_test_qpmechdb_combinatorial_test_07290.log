@@ -1,0 +1,144 @@
+=== TRACE METADATA ===
+{
+  "exam_id": "benchmark_v3_a",
+  "page_id": "pmechdb_test",
+  "question_id": "pmechdb_combinatorial_test_07290",
+  "answer_type": "reaction_description",
+  "model_name": "glm-5.1",
+  "student_status": "ok",
+  "student_error": "",
+  "student_elapsed_ms": 5730,
+  "runtime_metadata": {
+    "executor_type": "local",
+    "runtime_backend": "local_worker",
+    "tools_profile": "minimal",
+    "requested_local_tools": [],
+    "configured_local_tools": [],
+    "allow_network_tools": false,
+    "allowed_tool_hosts": [
+      "127.0.0.1",
+      "localhost",
+      "api.openai.com",
+      "openrouter.ai",
+      "api.together.xyz"
+    ],
+    "model_api_base": "https://api.aitunnel.ru/v1",
+    "managed_inference": false,
+    "sandbox_runtime": "local_worker"
+  },
+  "tool_usage_summary": {
+    "step_count": 1,
+    "steps_with_tool_calls": 0,
+    "tool_call_count": 0,
+    "tool_names": [],
+    "network_tool_names": []
+  }
+}
+
+=== QUESTION TEXT ===
+Classify the mechanistic class of the mapped reaction and identify the reaction center.
+
+Use the structured benchmark context below as the full task specification.
+Return the best chemistry answer grounded only in this context.
+
+<benchmark_context>
+{
+  "level": "A",
+  "task_family": "Reaction Understanding",
+  "task_subtype": "mechanistic_classification",
+  "difficulty": "medium",
+  "coverage_tags": [
+    "mechanistic_class",
+    "reaction_center",
+    "major_product"
+  ],
+  "benchmark_suite": "A",
+  "benchmark_subtrack": "A2",
+  "planning_horizon": "local",
+  "task_mode": "recognition",
+  "difficulty_proxies": [
+    "mechanistic_ambiguity",
+    "charge_and_polarity_pattern",
+    "local_explanation_burden"
+  ],
+  "eval_contract_id": "legacy_eval_contract.reaction_description.v1",
+  "expected_output_schema": "mechanistic_label",
+  "judge_rubric_id": "g_eval.reaction_description.v1",
+  "input": {
+    "reaction_smirks": "CCCC[NH2:10].CN1C=C[N+](C2=C(F)C(F)=C(F)C(F)=C2F)=C1[C:22](/[CH:21]=[CH:20]/[C:31]1=[CH:32][CH:33]=[CH:34][CH:35]=[CH:36]1)=[O:23]>>CCCC[NH2+:10][CH:20]([CH:21]=[C:22](C1=[N+](C2=C(F)C(F)=C(F)C(F)=C2F)C=CN1C)[O-:23])[C:31]1=[CH:32][CH:33]=[CH:34][CH:35]=[CH:36]1",
+    "reactants": "CCCC[NH2:10].CN1C=C[N+](C2=C(F)C(F)=C(F)C(F)=C2F)=C1[C:22](/[CH:21]=[CH:20]/[C:31]1=[CH:32][CH:33]=[CH:34][CH:35]=[CH:36]1)=[O:23]",
+    "reagents": "",
+    "products": "CCCC[NH2+:10][CH:20]([CH:21]=[C:22](C1=[N+](C2=C(F)C(F)=C(F)C(F)=C2F)C=CN1C)[O-:23])[C:31]1=[CH:32][CH:33]=[CH:34][CH:35]=[CH:36]1",
+    "conditions": {
+      "nucleophile_solvent": "MeCN",
+      "temperature_k": "293",
+      "sn_parameter": "3"
+    }
+  }
+}
+</benchmark_context>
+
+=== REASONING SUMMARY ===
+{
+  "step_count": 1,
+  "thoughts": [],
+  "provider_reasoning_summaries": [
+    "Let me analyze this reaction carefully.\n\nThe reactants are:\n1. Butylamine (CCCC[NH2:10])\n2. A vinyl pyridinium salt with a perfluorophenyl group: CN1C=C[N+](C2=C(F)C(F)=C(F)C(F)=C2F)=C1[C:22](/[CH:21]=[CH:20]/[C:31]1=[CH:32][CH:33]=[CH:34][CH:35]=[CH:36]1)=[O:23]\n\nThe product is: CCCC[NH2+:10][CH:20]([CH:21]=[C:22](C1=[N+](C2=C(F)C(F)=C(F)C(F)=C2F)C=CN1C)[O-:23])[C:31]1=[CH:32][CH:33]=[CH:34][CH:35]=[CH:36]1\n\nLet me trace the atom mapping:\n\n- N:10 goes from NH2 to NH2+ (butylamine nitrogen)\n- C:20 goes from =CH- to -CH( (was part of the vinyl group, now bonded to N:10)\n- C:21 goes from =CH- to =CH- (still double bonded to C:22)\n- C:22 goes from C(=O) to C(=O-) - the carbonyl carbon\n- O:23 goes from =O to O- (enolate oxygen)\n\nSo what's happening:\n1. The butylamine (nucleophile) attacks the β-carbon (C:20) of the α,β-unsaturated vinyl pyridinium system\n2. This is a conjugate addition (Michael addition)\n3. The C:20-C:21 double bond becomes single, and C:21-C:22 becomes a double bond (enolization)\n4. The oxygen O:23 goes from C=O to C-O- (enolate formation)\n5. The N:10 becomes protonated (NH2+)\n\nThis is a conjugate addition of an amine to a vinyl pyridinium salt. The mechanistic class is conjugate addition (Michael addition).\n\nThe reaction center involves:\n- N:10 attacks C:20\n- C:20-C:21 bond changes from double to single\n- C:21-C:22 bond changes from single to double\n- C:22=O:23 becomes C:22-O:23⁻ (enolate)\n\nThe mechanistic class is \"conjugate_addition\" or \"Michael_addition\".\n\nGiven the SN parameter of 3 and the nucleophile in MeCN, this is a conjugate addition mechanism.\n\nLet me provide the answer as a mechanistic class label."
+  ],
+  "reasoning_tokens_total": 443,
+  "note": "Best-effort summary from visible traces only. Hidden provider chain-of-thought is not exposed."
+}
+
+=== STEP SUMMARY ===
+Step 1 | duration_ms=5095 | reasoning_tokens=443
+  Thought: conjugate_addition
+
+=== SGR SCHEMA ===
+{
+  "sgr_schema_name": "",
+  "sgr_validation_status": "disabled",
+  "sgr_repair_attempted": false,
+  "sgr_fallback_used": false,
+  "sgr_snapshot": null
+}
+
+=== SGR CONTRACT CHECK ===
+<empty>
+
+=== SGR FINAL ANSWER CANDIDATE ===
+<empty>
+
+=== AGENT RUN DETAILS ===
+{
+  "state": "success",
+  "output_preview": "conjugate_addition",
+  "sgr_schema_name": "",
+  "sgr_validation_status": "disabled",
+  "sgr_repair_attempted": false,
+  "sgr_fallback_used": false,
+  "sgr_payload": null,
+  "step_count": 1,
+  "steps": [
+    {
+      "step_number": 1,
+      "duration_ms": 5095,
+      "thought": "conjugate_addition",
+      "code": "",
+      "tool_calls": [],
+      "observations_preview": "",
+      "model_output_preview": "",
+      "error": "",
+      "reasoning_tokens": 443,
+      "is_final_answer": false
+    }
+  ]
+}
+
+=== AGENT STDOUT/STDERR TRACE ===
+<empty>
+
+=== RAW MODEL ANSWER ===
+conjugate_addition
+
+=== NORMALIZED STUDENT ANSWER ===
+conjugate_addition

@@ -1,0 +1,171 @@
+=== TRACE METADATA ===
+{
+  "exam_id": "benchmark_v3_b",
+  "page_id": "orderly_test",
+  "question_id": "orderly_retro_test_0050264",
+  "answer_type": "text",
+  "model_name": "glm-5.1",
+  "student_status": "ok",
+  "student_error": "",
+  "student_elapsed_ms": 108312,
+  "runtime_metadata": {
+    "executor_type": "local",
+    "runtime_backend": "local_worker",
+    "tools_profile": "minimal",
+    "requested_local_tools": [],
+    "configured_local_tools": [],
+    "allow_network_tools": false,
+    "allowed_tool_hosts": [
+      "127.0.0.1",
+      "localhost",
+      "api.openai.com",
+      "openrouter.ai",
+      "api.together.xyz"
+    ],
+    "model_api_base": "https://api.aitunnel.ru/v1",
+    "managed_inference": false,
+    "sandbox_runtime": "local_worker"
+  },
+  "tool_usage_summary": {
+    "step_count": 1,
+    "steps_with_tool_calls": 0,
+    "tool_call_count": 0,
+    "tool_names": [],
+    "network_tool_names": []
+  }
+}
+
+=== QUESTION TEXT ===
+Propose plausible immediate precursors for the target molecule.
+
+Use the structured benchmark context below as the full task specification.
+Return the best chemistry answer grounded only in this context.
+
+<benchmark_context>
+{
+  "level": "B",
+  "task_family": "Single-Step Retrosynthesis",
+  "task_subtype": "immediate_precursor_prediction",
+  "difficulty": "medium",
+  "coverage_tags": [
+    "precursor_set",
+    "constraints",
+    "procedure_context"
+  ],
+  "benchmark_suite": "B",
+  "benchmark_subtrack": "B1",
+  "planning_horizon": "single_step",
+  "task_mode": "constrained_generation",
+  "difficulty_proxies": [
+    "precursor_count",
+    "disconnection_obviousness",
+    "procedure_context_constraints"
+  ],
+  "eval_contract_id": "legacy_eval_contract.text.v1",
+  "expected_output_schema": "precursor_set",
+  "judge_rubric_id": "g_eval.text.v1",
+  "input": {
+    "target": "C=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC"
+  }
+}
+</benchmark_context>
+
+=== REASONING SUMMARY ===
+{
+  "step_count": 1,
+  "thoughts": [],
+  "provider_reasoning_summaries": [
+    "Let me analyze the target molecule to identify the immediate precursors through retrosynthetic analysis.\n\nTarget: C=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC\n\nLet me parse this structure:\n- It has an ethyl ester group: C(=O)OCC\n- A but-3-enoate chain: C=CCC(=O)OCC (ethyl 4-pentenoate part connected via O)\n- Actually, let me re-read: C=CCC(O[C@H]1...)C(=O)OCC\n\nWait, let me parse more carefully:\n\nC=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC\n\nSo the structure is:\n- C=C-C-C(O[C@H]1...)-C(=O)OCC\n\nThis looks like: an allyl group (C=C) connected to a chain that has an oxygen linked to a cyclohexyl ring, and an ethyl ester.\n\nActually, let me think about this differently. The key structural features:\n\n1. There's a cyclohexane ring with trans substituents (two @H centers)\n2. One substituent on the ring is an oxygen connected to a chain: C=CCC(...)C(=O)OCC\n3. The other substituent is a nitrogen connected to a complex heterocyclic system\n\nThe heterocyclic system: n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32\n\nThis looks like a fused ring system - a pyrimidinone or similar. Let me parse:\n- n2c(=O)c(...)c(...)n3ncnc32\n\nThis is a bicyclic system: positions 2 and 3 are shared. The ring contains: n2-c(=O)-c-c-n3-nc-nc-3-2\n\nThis looks like a quinazolinone or similar fused heterocycle. Specifically, it could be a [1,2,4]triazolo[4,3-c]pyrimidinone or similar.\n\nActually, let me reconsider. The pattern n2c(=O)c(R)c(R')n3ncnc32 suggests a fused triazolopyrimidinone system.\n\nKey disconnections to consider:\n\n1. The ester could be formed from an acid + ethanol (Fischer esterification) - but this is trivial\n2. The ether linkage O[C@H] could be formed via SN2 or Mitsunobu reaction\n3. The C-N bond connecting the cyclohexane to the heterocycle\n\nThe most strategic disconnection for retrosynthesis would be:\n\nLooking at the molecule, the most obvious disconnection is the C-O bond (ether formation) or the C-N bond.\n\nFor the C-O bond: This would give an alcohol (the cyclohexanol with the heterocyclic substituent) and an alkyl halide/activated species from the C=CCCC(=O)OCC part.\n\nActually, C=CCC(O...)C(=O)OCC - this is ethyl 4-pentenoate with an OH replaced by O-cyclohexyl. Wait, no.\n\nLet me re-parse: C=C-C-C(O[C@H]1...)-C(=O)-O-CC\n\nSo the chain is: CH2=CH-CH2-CH(O-cyclohexyl)-C(=O)-OEt\n\nThis is an α-alkoxy ester. The disconnection at the C-O bond would give:\n- The cyclohexanol bearing the heterocyclic amine\n- An α-halo ester or similar electrophile\n\nActually, for the most direct retrosynthetic step, I think the key disconnection is the ether bond (C-O), which would give:\n\nPrecursor 1: The trans-4-aminocyclohexanol derivative (with the heterocyclic substituent on nitrogen)\nPrecursor 2: Ethyl 4-bromo-4-pentenoate or ethyl 2-(bromomethyl)acrylate... \n\nWait, let me reconsider the chain. C=CCC(O[C@H]1...)C(=O)OCC\n\nStarting from the ester: -C(=O)OCC (ethyl ester)\nGoing back: C(=O)OCC with a substituent on the alpha carbon\nThe alpha carbon has: O[C@H]1... and C=CCC\n\nSo the chain from the ester carbon is:\nC(=O)-C(O-cyclohexyl)(CH2CH=CH2)-... no wait.\n\nLet me be very careful:\n\nC=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC\n\nBreaking this down atom by atom:\n- C=C (double bond, terminal alkene)\n- C (third carbon)\n- C (fourth carbon, bearing the O and connected to ester)\n- (O[C@H]1... (oxygen connected to cyclohexane ring)\n- C(=O)OCC (ethyl ester)\n\nSo the chain is: CH2=CH-CH2-C(O-cyclohexyl)(H?)-C(=O)-OEt\n\nWait, that doesn't work either. Let me count:\n\nC=C-C-C(O[C@H]1...)-C(=O)-O-C-C\n\nSo: \n- Position 1: =CH2\n- Position 2: CH\n- Position 3: CH2  \n- Position 4: C (bearing O-cyclohexyl)\n- Position 5: C(=O)\n- Then OEt\n\nHmm, but position 4 has O-cyclohexyl and is connected to position 3 and position 5. That's only 3 bonds plus the O. So position 4 also needs an H.\n\nSo the fragment is: CH2=CH-CH2-CH(O-cyclohexyl)-C(=O)-OEt\n\nThis is ethyl 2-(cyclohexyloxy)pent-4-enoate or similar.\n\nThe retrosynthetic disconnection of the C-O bond would give:\n1. The cyclohexanol (bearing the heterocyclic amine on the ring)\n2. Ethyl 2-bromopent-4-enoate or ethyl 4-bromopent-4-enoate... \n\nActually, for an SN2-type ether formation, we'd need:\n- The alcohol: the cyclohexanol with the heterocyclic substituent\n- The electrophile: something like ethyl 4-bromobut-2-enoate... \n\nHmm, let me think about this differently. The most common way to form such an ether would be:\n\nMitsunobu reaction between the alcohol and the α-hydroxy ester, or Williamson ether synthesis.\n\nOr alternatively, the C-N bond disconnection might be more strategic.\n\nThe C-N bond connecting the cyclohexane to the nitrogen of the heterocycle:\n\nThis would give:\n1. The cyclohexanol (with O-ether substituent) - actually the cyclohexane bearing the O-ether chain\n2. The heterocyclic compound with a leaving group (like a chloride)\n\nActually, for a single-step retrosynthesis, I should identify the most obvious disconnection.\n\nLooking at this molecule again, the most likely synthetic route involves:\n\n1. N-alkylation of the heterocyclic NH with a cyclohexyl derivative\n2. O-alkylation of the cyclohexanol with an activated ester\n\nFor the immediate precursor prediction, the most direct disconnection would be:\n\nThe C-N bond: disconnecting the nitrogen from the cyclohexane ring.\n\nThis gives:\n- Precursor 1: trans-4-(2-(ethoxycarbonyl)but-3-en-1-yloxy)cyclohexanamine (or its hydrochloride)\n  Actually: the cyclohexane ring with OH and NH2 in trans configuration, where OH is already alkylated with the ester chain.\n\nHmm, this is getting complicated. Let me think about what the most reasonable single-step retrosynthetic disconnection is.\n\nActually, I think the most obvious disconnection is the ether bond. In many drug synthesis contexts, the ether is formed late in the synthesis.\n\nDisconnection of the C-O bond (ether):\n\nPrecursor 1: The cyclohexylamine bearing the heterocycle, with an OH group\nSMILES: O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1\n\nPrecursor 2: The alkylating agent - ethyl 4-bromobut-2-enoate or similar\nActually, for the chain C=CCC(...)C(=O)OCC, if we disconnect the O from the cyclohexane, we get:\nThe fragment would be: C=CCC(Br)C(=O)OCC or C=CCC(OH)C(=O)OCC\n\nWait, I need to think about this more carefully. The ether oxygen is on the cyclohexane ring. So:\n\nTarget: R-O-cyclohexyl-N(heterocycle)\n\nDisconnection at C-O gives:\n- R-OH (no, that's not right)\n- Actually: cyclohexyl-OH + R-X (where R is the ester chain)\n\nNo wait. The oxygen is part of the chain, not the ring. Let me re-examine.\n\nThe oxygen connects the cyclohexane ring to the carbon chain. So:\n\nCyclohexane-CH-O-CH(chain)... no.\n\nO[C@H]1 - the oxygen is attached to a ring carbon. So the ring carbon has the O substituent.\n\nSo the disconnection is: ring-C-O-chain\n\nThis gives:\n- Cyclohexanol (with the N-heterocycle substituent): HO[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1\n- The chain as an electrophile: BrC(=C)CC(=O)OCC or similar\n\nActually, the chain fragment after removing the O-cyclohexyl would be:\nC=CCC(?)C(=O)OCC where ? is the position that was connected to O.\n\nIf we disconnect the C(ring)-O bond, we get:\n- Alcohol: the cyclohexanol\n- Electrophile: the chain with a leaving group where O was\n\nBut wait, the O stays with the chain or the ring? In ether disconnection, typically:\n\nR-O-R' → R-OH + R'-X (Williamson ether synthesis)\n\nSo if we disconnect:\n- Ring carbon loses O, gets OH (or the other way)\n- Chain carbon gets a leaving group\n\nThe chain is: C=C-C-C(-)-C(=O)OCC where - is where O was attached.\n\nSo the chain electrophile would be: C=C-C-C(X)-C(=O)OCC where X is a leaving group (Br, Cl, OTs, etc.)\n\nThis is ethyl 2-(halomethyl)pent-4-enoate or ethyl 4-halo-4-pentenoate... \n\nHmm, let me reconsider. The SMILES is C=CCC(O[C@H]1...)C(=O)OCC\n\nReading the SMILES more carefully:\n- C=C: alkene\n- C: carbon 3\n- C: carbon 4 (this is the one with the O substituent)\n- (O[C@H]1...): the O-cyclohexyl group on carbon 4\n- C(=O)OCC: the ester on carbon 5\n\nWait, that means carbon 4 has: bond to C3, bond to O-cyclohexyl, bond to C5(=O)OEt. That's 3 bonds + O = 4 bonds total. So carbon 4 has no H.\n\nSo the chain is: CH2=CH-CH2-C(O-cyclohexyl)(?)-C(=O)-OEt\n\nCarbon 4 has bonds to: C3, O-cyclohexyl, C5. That's only 3 bonds. It needs one more - an H.\n\nSo: CH2=CH-CH2-CH(O-cyclohexyl)-C(=O)-OEt\n\nThis is ethyl 2-(cyclohexyloxy)pent-4-enoate.\n\nFor the ether disconnection:\n- Alcohol: trans-4-(heterocyclylamino)cyclohexanol\n- Electrophile: ethyl 4-bromopent-4-enoate? No...\n\nActually, the electrophile would be ethyl 2-bromo-4-pentenoate: BrCH(C(=O)OEt)CH2CH=CH2\n\nOr more precisely, if we're doing a Williamson ether synthesis, we need:\n- The alkoxide of the cyclohexanol\n- An alkyl halide: BrCH(CH2CH=CH2)C(=O)OEt (ethyl 2-bromo-4-pentenoate)\n\nBut actually, I think the more common and practical disconnection might be different. Let me reconsider.\n\nAnother possibility: the C-N bond disconnection.\n\nThe nitrogen on the cyclohexane ring is connected to the heterocyclic system. Disconnecting this C-N bond would give:\n1. The cyclohexanol with the ether chain (an amine): H2N[C@H]1CC[C@H](O-chain)CC1\n   Actually: H2N[C@@H]1CC[C@@H](OCH(CH2CH=CH2)C(=O)OEt)CC1\n   \n2. The heterocyclic compound with a leaving group\n\nHmm, this is also possible but seems less clean.\n\nI think the most straightforward single-step retrosynthetic disconnection is the ether bond.\n\nLet me also consider: maybe the ester is formed from an acid + ethanol. But that's trivial and not the main disconnection.\n\nOr maybe the molecule is formed via a coupling reaction.\n\nLet me think about what's most likely for this type of molecule. This looks like it could be a pharmaceutical compound. The key disconnections would be:\n\n1. Ether bond (C-O) - Williamson ether synthesis or Mitsunobu\n2. C-N bond - N-alkylation\n3. Ester formation\n\nFor the most direct retrosynthetic step, I'll go with the ether disconnection as it's the most obvious.\n\nPrecursor 1: trans-4-(heterocyclylamino)cyclohexanol\nSMILES: O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1\n\nPrecursor 2: ethyl 2-bromo-4-pentenoate (or the corresponding chloride, tosylate, etc.)\nSMILES: C=CCCH(Br)C(=O)OCC\n\nWait, let me double-check the chain. The original is C=CCC(O...)C(=O)OCC.\n\nIf I remove the O-cyclohexyl part, the chain with a leaving group would be:\nC=CCCH(Br)C(=O)OCC\n\nHmm, but that's ethyl 2-bromo-4-pentenoate. Let me verify: \n- C1=C (CH2=CH-)\n- C3 (CH2)\n- C4 (CH, bearing Br and connected to C5)\n- C5 (C=O, ester)\n\nSo: CH2=CH-CH2-CHBr-C(=O)-OEt\n\nThat's ethyl 2-bromo-4-pentenoate. Yes.\n\nActually, I realize I should double-check my SMILES parsing. Let me use the chem tool to verify.\n\nActually, let me just go with my analysis. The key disconnection is the ether bond.\n\nAnswer: O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1; C=CCCH(Br)C(=O)OCC\nDisconnection: C(ring)-O ether bond\n\nWait, but I should double-check whether the C-N bond might be a better disconnection. In many pharmaceutical syntheses, the N-alkylation step is the key bond-forming step.\n\nLet me reconsider. The heterocyclic system has an NH that gets alkylated by the cyclohexyl derivative. This is a very common transformation in medicinal chemistry.\n\nIf I disconnect the C-N bond:\nPrecursor 1: The heterocyclic NH compound\nSMILES: O=c1c(Cc2ccc(-c3ccccc3C#N)cc2F)c(CCC)n2ncnc12 (with an NH)\n\nWait, I need to be more careful. The nitrogen in the ring system - is it an NH that was alkylated?\n\nLooking at the heterocycle: n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32\n\nThe nitrogen at position 2 (n2) is connected to the cyclohexane ring. In the precursor, this would be an NH.\n\nSo the heterocyclic precursor would have an NH instead of N-cyclohexyl:\nO=c1[nH]c(Cc2ccc(-c3ccccc3C#N)cc2F)c(CCC)n2ncnc12\n\nHmm, this is getting complex. Let me just verify with the tool.\n\nActually, I think both disconnections are valid, but the C-N bond disconnection (N-alkylation) is probably the more strategic and common one for this type of molecule. The heterocyclic NH compound would be alkylated with a cyclohexyl derivative bearing a leaving group.\n\nBut wait - the cyclohexane ring has both the N and the O substituents. If we disconnect the C-N bond, we need a cyclohexyl halide or similar electrophile that already has the O-ether chain installed. That means the ether would need to be installed first, which is fine for a single-step retrosynthesis.\n\nAlternatively, if we disconnect the C-O bond first, we need the cyclohexanol with the N-heterocycle already installed.\n\nFor a single-step retrosynthesis, either disconnection is valid. I'll go with the ether disconnection as it's perhaps more straightforward.\n\nLet me finalize:\n\nPrecursor 1 (cyclohexanol): O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1\n\nPrecursor 2 (alkylating agent): C=CCCH(Br)C(=O)OCC\n\nDisconnection: C-O ether bond\n\nHmm, but actually I want to double-check the SMILES. Let me use the chem tool to validate.\n\nActually, let me just verify my parsing is correct by using the tool. analysis."
+  ],
+  "reasoning_tokens_total": 3528,
+  "note": "Best-effort summary from visible traces only. Hidden provider chain-of-thought is not exposed."
+}
+
+=== STEP SUMMARY ===
+Step 1 | duration_ms=107086 | reasoning_tokens=3528
+  Thought: Looking at the target molecule, I need to identify the most strategic single-step retrosynthetic disconnection. Let me parse the structure and validate myfrom rdkit import Chem from rdkit.Chem import Draw, AllChem target = "C=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC" mol = Chem.MolFromSmiles(target) print("Valid:", mol is not None) print("SMILES canonical:", Chem.MolToSmiles(mol)) # Identify key functional groups # Let's look at the ether linkage and th...
+
+=== SGR SCHEMA ===
+{
+  "sgr_schema_name": "",
+  "sgr_validation_status": "disabled",
+  "sgr_repair_attempted": false,
+  "sgr_fallback_used": false,
+  "sgr_snapshot": null
+}
+
+=== SGR CONTRACT CHECK ===
+<empty>
+
+=== SGR FINAL ANSWER CANDIDATE ===
+<empty>
+
+=== AGENT RUN DETAILS ===
+{
+  "state": "success",
+  "output_preview": "Looking at the target molecule, I need to identify the most strategic single-step retrosynthetic disconnection. Let me parse the structure and validate myfrom rdkit import Chem from rdkit.Chem import Draw, AllChem target = \"C=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC\" mol = Chem.MolFromSmiles(target) print(\"Valid:\", mol is not None) print(\"SMILES canonical:\", Chem.MolToSmiles(mol)) # Identify key functional groups # Let's look at the ether linkage and th...",
+  "sgr_schema_name": "",
+  "sgr_validation_status": "disabled",
+  "sgr_repair_attempted": false,
+  "sgr_fallback_used": false,
+  "sgr_payload": null,
+  "step_count": 1,
+  "steps": [
+    {
+      "step_number": 1,
+      "duration_ms": 107086,
+      "thought": "Looking at the target molecule, I need to identify the most strategic single-step retrosynthetic disconnection. Let me parse the structure and validate myfrom rdkit import Chem from rdkit.Chem import Draw, AllChem target = \"C=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC\" mol = Chem.MolFromSmiles(target) print(\"Valid:\", mol is not None) print(\"SMILES canonical:\", Chem.MolToSmiles(mol)) # Identify key functional groups # Let's look at the ether linkage and th...",
+      "code": "",
+      "tool_calls": [],
+      "observations_preview": "",
+      "model_output_preview": "",
+      "error": "",
+      "reasoning_tokens": 3528,
+      "is_final_answer": false
+    }
+  ]
+}
+
+=== AGENT STDOUT/STDERR TRACE ===
+<empty>
+
+=== RAW MODEL ANSWER ===
+Looking at the target molecule, I need to identify the most strategic single-step retrosynthetic disconnection.
+
+Let me parse the structure and validate myfrom rdkit import Chem
+from rdkit.Chem import Draw, AllChem
+
+target = "C=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC"
+mol = Chem.MolFromSmiles(target)
+print("Valid:", mol is not None)
+print("SMILES canonical:", Chem.MolToSmiles(mol))
+
+# Identify key functional groups
+# Let's look at the ether linkage and the N-heterocycle bond
+# Disconnect the C-O ether bond
+# Precursor 1: cyclohexanol with N-heterocycle
+# Precursor 2: alpha-bromo ester
+
+precursor1 = "O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1"
+precursor2 = "C=CCCH(Br)C(=O)OCC"
+
+p1 = Chem.MolFromSmiles(precursor1)
+p2 = Chem.MolFromSmiles(precursor2)
+print("P1 valid:", p1 is not None)
+if p1: print("P1 SMILES:", Chem.MolToSmiles(p1))
+print("P2 valid:", p2 is not None)
+if p2: print("P2 SMILES:", Chem.MolToSmiles(p2))
+
+# Also check N-alkylation disconnection
+# Precursor A: heterocyclic NH compound
+# Precursor B: cyclohexyl derivative with leaving group
+
+precursorA = "O=c1[nH]c(Cc2ccc(-c3ccccc3C#N)cc2F)c(CCC)n2ncnc12"
+precursorB = "O([C@H]1CC[C@@H](X)CC1)C=CCCC(=O)OCC"  # with leaving group
+
+pA = Chem.MolFromSmiles(precursorA)
+print("PA valid:", pA is not None)
+if pA: print("PA SMILES:", Chem.MolToSmiles(pA))
+
+=== NORMALIZED STUDENT ANSWER ===
+Looking at the target molecule, I need to identify the most strategic single-step retrosynthetic disconnection. Let me parse the structure and validate myfrom rdkit import Chem from rdkit.Chem import Draw, AllChem target = "C=CCC(O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1)C(=O)OCC" mol = Chem.MolFromSmiles(target) print("Valid:", mol is not None) print("SMILES canonical:", Chem.MolToSmiles(mol)) # Identify key functional groups # Let's look at the ether linkage and the N-heterocycle bond # Disconnect the C-O ether bond # Precursor 1: cyclohexanol with N-heterocycle # Precursor 2: alpha-bromo ester precursor1 = "O[C@H]1CC[C@H](n2c(=O)c(Cc3ccc(-c4ccccc4C#N)cc3F)c(CCC)n3ncnc32)CC1" precursor2 = "C=CCCH(Br)C(=O)OCC" p1 = Chem.MolFromSmiles(precursor1) p2 = Chem.MolFromSmiles(precursor2) print("P1 valid:", p1 is not None) if p1: print("P1 SMILES:", Chem.MolToSmiles(p1)) print("P2 valid:", p2 is not None) if p2: print("P2 SMILES:", Chem.MolToSmiles(p2)) # Also check N-alkylation disconnection # Precursor A: heterocyclic NH compound # Precursor B: cyclohexyl derivative with leaving group precursorA = "O=c1[nH]c(Cc2ccc(-c3ccccc3C#N)cc2F)c(CCC)n2ncnc12" precursorB = "O([C@H]1CC[C@@H](X)CC1)C=CCCC(=O)OCC" # with leaving group pA = Chem.MolFromSmiles(precursorA) print("PA valid:", pA is not None) if pA: print("PA SMILES:", Chem.MolToSmiles(pA))

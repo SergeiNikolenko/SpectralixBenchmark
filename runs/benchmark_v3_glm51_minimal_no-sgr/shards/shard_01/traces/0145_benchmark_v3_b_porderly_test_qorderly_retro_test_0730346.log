@@ -1,0 +1,141 @@
+=== TRACE METADATA ===
+{
+  "exam_id": "benchmark_v3_b",
+  "page_id": "orderly_test",
+  "question_id": "orderly_retro_test_0730346",
+  "answer_type": "text",
+  "model_name": "glm-5.1",
+  "student_status": "ok",
+  "student_error": "",
+  "student_elapsed_ms": 227009,
+  "runtime_metadata": {
+    "executor_type": "local",
+    "runtime_backend": "local_worker",
+    "tools_profile": "minimal",
+    "requested_local_tools": [],
+    "configured_local_tools": [],
+    "allow_network_tools": false,
+    "allowed_tool_hosts": [
+      "127.0.0.1",
+      "localhost",
+      "api.openai.com",
+      "openrouter.ai",
+      "api.together.xyz"
+    ],
+    "model_api_base": "https://api.aitunnel.ru/v1",
+    "managed_inference": false,
+    "sandbox_runtime": "local_worker"
+  },
+  "tool_usage_summary": {
+    "step_count": 1,
+    "steps_with_tool_calls": 0,
+    "tool_call_count": 0,
+    "tool_names": [],
+    "network_tool_names": []
+  }
+}
+
+=== QUESTION TEXT ===
+Propose plausible immediate precursors for the target molecule.
+
+Use the structured benchmark context below as the full task specification.
+Return the best chemistry answer grounded only in this context.
+
+<benchmark_context>
+{
+  "level": "B",
+  "task_family": "Single-Step Retrosynthesis",
+  "task_subtype": "immediate_precursor_prediction",
+  "difficulty": "hard",
+  "coverage_tags": [
+    "precursor_set",
+    "constraints",
+    "procedure_context"
+  ],
+  "benchmark_suite": "B",
+  "benchmark_subtrack": "B1",
+  "planning_horizon": "single_step",
+  "task_mode": "constrained_generation",
+  "difficulty_proxies": [
+    "precursor_count",
+    "disconnection_obviousness",
+    "procedure_context_constraints"
+  ],
+  "eval_contract_id": "legacy_eval_contract.text.v1",
+  "expected_output_schema": "precursor_set",
+  "judge_rubric_id": "g_eval.text.v1",
+  "input": {
+    "target": "C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1"
+  }
+}
+</benchmark_context>
+
+=== REASONING SUMMARY ===
+{
+  "step_count": 1,
+  "thoughts": [],
+  "provider_reasoning_summaries": [
+    "Let me analyze the target molecule: C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nLet me parse this SMILES:\n- C=C(C) - an isopropenyl group\n- C(O) - carbon with hydroxyl\n- CC - two carbons\n- /C(C)=C/ - a double bond with E configuration\n- CC - two carbons\n- /C(C)=C\\ - a double bond with Z configuration\n- COC1CCCCO1 - a tetrahydropyran ring (THP-protected alcohol)\n\nThis looks like a terpene alcohol with a THP protecting group. Let me think about the retrosynthetic disconnection.\n\nThe molecule has:\n1. An isopropenyl group at one end\n2. A hydroxyl group\n3. Two isopropenyl-type double bonds in the chain\n4. A THP-protected alcohol at the other end\n\nThis looks like it could be derived from farnesol or a similar terpene. Let me think about the key disconnections.\n\nThe most obvious disconnection would be at one of the double bonds in the chain, using a Wittig or similar olefination reaction. But let me think more carefully.\n\nActually, looking at this more carefully, this molecule has the skeleton of a terpenoid. The double bonds with methyl branches suggest it could come from coupling of isoprene units.\n\nFor a single-step retrosynthesis, the most direct disconnection would be:\n1. Remove the THP protecting group → gives the free alcohol\n2. Disconnect at one of the C=C double bonds via Wittig or similar\n\nBut the task asks for immediate precursors for one retrosynthetic step.\n\nLet me reconsider. The THP group is a protecting group, so removing it would give the free alcohol. But that's a deprotection, not a bond-forming step.\n\nFor retrosynthetic analysis, the key bond-forming disconnections would be:\n- At the C=C double bonds (Wittig reaction)\n- At the C-O bond (addition to an aldehyde/ketone)\n\nLooking at the structure more carefully:\n\nC=C(C)C(O)CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nLet me number the carbons:\n- C1=C2(C) - isopropenyl\n- C3(O) - hydroxyl-bearing carbon\n- C4C5 - chain\n- C6/C7(C)=C8/ - double bond (E)\n- C9C10 - chain  \n- C11/C12(C)=C13\\ - double bond (Z)\n- C14-O-C15(1CCCCO1) - THP ether\n\nThis looks like it could be a farnesol derivative. The THP group protects a primary alcohol.\n\nFor the retrosynthetic step, I think the most logical disconnection is at one of the double bonds using a Wittig-type reaction, or at the C-O bond of the alcohol.\n\nActually, let me reconsider the structure. The hydroxyl is on C3, which is allylic to the isopropenyl group. This could come from addition of an organometallic to an aldehyde or ketone.\n\nWait, let me re-examine. C=C(C)C(O) - this is a 2-methyl-3-buten-2-ol type fragment, which could come from addition of isopropenyl magnesium bromide or similar to an aldehyde.\n\nSo one possible disconnection:\n- Disconnect the C-C bond between the isopropenyl group and the hydroxyl-bearing carbon\n- This gives: isopropenyl magnesium bromide (or similar) + an aldehyde\n\nThe aldehyde would be: O=CCC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nBut actually, let me think about what's the most standard retrosynthetic step here.\n\nAnother approach: disconnect at the C=C double bond in the middle of the chain using a Wittig reaction.\n\nOr, the THP group could be removed to give the free alcohol as a precursor.\n\nHmm, but the question asks for \"immediate precursors\" which suggests the most direct retrosynthetic step.\n\nLet me think about this differently. The molecule is:\n\nCH2=C(CH3)-CH(OH)-CH2-CH2-C(CH3)=CH-CH2-CH2-C(CH3)=CH-CH2-O-THP\n\nThis is essentially a farnesol derivative with:\n- A hydroxyl replacing one of the double bonds (or rather, the hydroxyl is at C3)\n- A THP-protected primary alcohol at the other end\n\nWait, let me reconsider. Farnesol is:\n(E,E)-3,7,11-trimethyl-2,6,10-dodecatrien-1-ol\n\nThe target molecule doesn't quite match farnesol's structure. Let me re-examine.\n\nActually, looking at the SMILES again: C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nThis could be viewed as:\n- An isopropenyl group\n- Connected to a carbon with OH\n- Then a chain with two more isopropenyl-type double bonds\n- Ending in a THP-protected alcohol\n\nThe most logical retrosynthetic disconnection for a single step would be:\n\n1. Wittig disconnection at one of the C=C bonds\n2. Grignard addition to an aldehyde/ketone\n3. THP deprotection\n\nFor a \"hard\" difficulty question, the answer likely involves a less obvious disconnection.\n\nLet me think about the Wittig approach. If we disconnect at the double bond closest to the THP end:\n\nC=C(C)C(O)CC/C(C)=C/CC + [PPh3=C(CH3)CH2OTHP] (ylide)\n\nOr disconnect at the middle double bond:\n\nC=C(C)C(O)CC + [PPh3=C(CH3)CH=CHCH2OTHP] - but this doesn't work well because of the existing double bond geometry.\n\nActually, for a cleaner analysis, let me consider the most common retrosynthetic transformations for terpenoids:\n\nThe molecule could be formed by:\n1. Coupling of two fragments via a Wittig or Julia reaction\n2. Addition of an organometallic to a carbonyl\n\nGiven the structure, I think the most direct disconnection is at the C-C bond adjacent to the hydroxyl, giving an isopropenyl organometallic and an aldehyde.\n\nPrecursor 1: CH2=C(CH3)MgBr (isopropenyl magnesium bromide) or CH2=C(CH3)Li\nPrecursor 2: O=CHCH2CH2C(CH3)=CHCH2CH2C(CH3)=CHCH2OTHP (an aldehyde)\n\nWait, but that would give a secondary alcohol, which matches the target.\n\nActually, let me reconsider. The hydroxyl is on C3 (counting from the isopropenyl end). If we disconnect the bond between C2 and C3:\n\nCH2=C(CH3)- | -CH(OH)-R\n\nThis would be: isopropenyl anion + aldehyde R-CHO\n\nWhere R = CH2CH2C(CH3)=CHCH2CH2C(CH3)=CHCH2OTHP\n\nSo the aldehyde would be: OHCCH2CH2/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nHmm, but this is a 1,2-addition of a vinyl organometallic to an aldehyde, which is a standard reaction.\n\nAlternatively, we could disconnect at one of the double bonds using a Wittig reaction.\n\nLet me think about which disconnection is most \"immediate\" and direct.\n\nFor a single-step retrosynthesis, I think the Wittig disconnection at one of the double bonds is the most standard approach for terpenoids.\n\nLet me try disconnecting at the double bond between the two isoprene-like units in the middle:\n\nFragment 1 (aldehyde): C=C(C)C(O)CCC(C)=C=O → no, this doesn't work.\n\nLet me try again. For a Wittig disconnection at the C=C bond:\n\nC=C(C)C(O)CC/C(C)=C/ | CC/C(C)=C\\COC1CCCCO1\n\nThis gives:\n- Aldehyde: O=CC/C(C)=C\\COC1CCCCO1 (with Z double bond)\n- Phosphonium ylide: C=C(C)C(O)CCC(C)=C=PPh3 (with E double bond)\n\nWait, but the Wittig reaction would form the double bond, so:\n- Aldehyde: OHC-CH2-CH2-C(CH3)=CH-CH2-O-THP (with Z configuration)\n- Ylide: Ph3P=C(CH3)-CH=CH-CH2-... no, this is getting complicated.\n\nLet me simplify. The most straightforward retrosynthetic step for this terpenoid would be:\n\nDisconnect at the C=C double bond nearest to the THP end using a Wittig reaction:\n\nAldehyde: O=CHCH2CH2C(CH3)=CHCH2CH2C(CH3)=CHCH2OTHP → wait, this is the whole chain minus the isopropenyl part.\n\nActually, I think I'm overcomplicating this. Let me reconsider.\n\nThe target is: CH2=C(CH3)-CH(OH)-CH2-CH2-C(CH3)=CH-CH2-CH2-C(CH3)=CH-CH2-O-THP\n\nThe most logical single-step retrosynthetic disconnection for a terpenoid like this would be at one of the C=C double bonds, using a Wittig or Horner-Wadsworth-Emmons reaction.\n\nIf we disconnect at the double bond closest to the THP end:\n\nFragment A (aldehyde): CH2=C(CH3)-CH(OH)-CH2-CH2-C(CH3)=CH-CH2-CH2-CHO\nFragment B (phosphonium salt/ylide): Ph3P=CH-CH2-O-THP → but this would give a terminal double bond, not an internal one with a methyl branch.\n\nHmm, that doesn't work because the double bond has a methyl branch.\n\nLet me try disconnecting at the middle double bond:\n\nFragment A: CH2=C(CH3)-CH(OH)-CH2-CH2-CHO (an aldehyde)\nFragment B: Ph3P=C(CH3)-CH2-CH2-C(CH3)=CH-CH2-O-THP (a phosphonium ylide)\n\nWait, but the ylide would need to have the right structure. In a Wittig reaction:\nR1-CH=PPh3 + R2-CHO → R1-CH=CH-R2\n\nSo for the middle double bond:\nR1 = C(CH3)-CH2-CH2-C(CH3)=CH-CH2-O-THP\nR2 = CH2=C(CH3)-CH(OH)-CH2-CH2-\n\nThis means:\nYlide: Ph3P=CH-C(CH3)=CH-CH2-CH2-C(CH3)=CH-CH2-O-THP → this is getting too complex.\n\nActually, I think the simplest approach is:\n\nDisconnect at the bond between the hydroxyl-bearing carbon and the adjacent carbon, giving:\n- An isopropenyl Grignard reagent: CH2=C(CH3)MgBr\n- An aldehyde: OHCCH2CH2/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nThis is a straightforward 1,2-addition of a vinyl Grignard to an aldehyde.\n\nBut wait, is this the most \"immediate\" precursor? The question is about immediate precursors, and for a hard difficulty, maybe they want the Wittig disconnection.\n\nLet me reconsider the structure. Actually, I realize I should think about this more carefully.\n\nThe target molecule has the structure of a modified farnesol or nerolidol derivative. Let me check if it's related to (E,E)-farnesol or (Z,E)-nerolidol.\n\nFarnesol: (2E,6E)-3,7,11-trimethyldodeca-2,6,10-trien-1-ol\nSMILES: CC(C)=CCC(C)=CCC(C)=CCO\n\nNerolidol: 3,7,11-trimethyl-1,6,10-dodecatrien-3-ol\nSMILES: CC(=C)C(O)CC/C(C)=C/CC/C(C)=C/C\n\nHmm, the target molecule looks like nerolidol with a THP-protected primary alcohol instead of a terminal double bond.\n\nTarget: C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nSo it's like nerolidol where the terminal =CH2 is replaced by -CH2OTHP.\n\nFor nerolidol synthesis, a common approach is:\n1. Addition of isopropenyl Grignard to an aldehyde (like farnesal)\n2. Or Wittig reaction\n\nGiven this, the most direct retrosynthetic step would be:\n\nDisconnect at the C-C bond between the isopropenyl group and the hydroxyl-bearing carbon:\n\nPrecursor 1: CH2=C(CH3)MgBr (isopropenylmagnesium bromide)\nPrecursor 2: O=CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1 (an aldehyde - this is like farnesal with THP)\n\nOr alternatively:\n\nPrecursor 1: CH2=C(CH3) (isopropenyl group as a nucleophile)\nPrecursor 2: The corresponding aldehyde\n\nBut for the answer format, I need to provide SMILES or names of the precursors.\n\nLet me write the SMILES:\n\nPrecursor 1 (aldehyde): O=CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\nPrecursor 2 (isopropenyl Grignard or equivalent): C=C(C)[MgBr] or just C=C(C) as the nucleophilic partner\n\nActually, for the answer format, I should provide the organic precursors. The Grignard reagent would be derived from isopropenyl bromide.\n\nSo:\nPrecursor 1: O=CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1 (aldehyde)\nPrecursor 2: C=C(C)Br (isopropenyl bromide) - which would be converted to the Grignard\n\nOr maybe I should think of it differently. Let me consider the Wittig approach.\n\nFor a Wittig disconnection at the double bond between C6 and C7 (the E double bond in the middle):\n\nThis would give:\n- An aldehyde: O=CCC/C(C)=C\\COC1CCCCO1\n- A phosphonium ylide derived from: C=C(C)C(O)CC[P+](Ph3) → but this is complex\n\nActually, I think the simplest and most direct retrosynthetic step is the Grignard addition to an aldehyde.\n\nLet me finalize:\n\nDisconnection: C-C bond between isopropenyl group and hydroxyl-bearing carbon (1,2-addition of vinyl nucleophile to aldehyde)\n\nPrecursor 1: O=CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1 (aldehyde)\nPrecursor 2: C=C(C)MgBr or the corresponding halide C=C(C)Br\n\nFor the answer format, I'll provide the two organic precursors.\n\nWait, but I should double-check the aldehyde SMILES. The aldehyde would be:\n\nStarting from the hydroxyl-bearing carbon (which becomes the aldehyde carbon):\n- CHO\n- CH2\n- CH2\n- C(CH3)=CH (E)\n- CH2\n- CH2\n- C(CH3)=CH (Z)\n- CH2\n- O\n- THP\n\nSo: O=CCC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nLet me verify this makes sense. The aldehyde carbon is at position 1, then:\n- C2-C3 chain\n- C4/C5 double bond (E) with methyl on C4\n- C6-C7 chain\n- C8/C9 double bond (Z) with methyl on C8\n- C10-O-THP\n\nYes, this looks correct.\n\nSo my answer:\n\nAnswer: O=CCC/C(C)=C/CC/C(C)=C\\COC1CCCCO1; C=C(C)Br\nDisconnection: C-C bond formation via Grignard addition of isopropenyl nucleophile to aldehyde\n\nHmm, but I should consider whether the answer should use the Grignard reagent directly or the halide precursor. In retrosynthesis, we typically show the immediate synthetic precursors, which would be the Grignard reagent and the aldehyde. But the Grignard is made from the halide.\n\nFor immediate precursors, I think the aldehyde and the isopropenyl halide (or organometallic) are appropriate.\n\nActually, let me reconsider. Maybe the intended disconnection is different. Let me think about what makes this \"hard\" difficulty.\n\nFor a hard question, maybe the disconnection is less obvious. Perhaps it's a Wittig disconnection at one of the internal double bonds, or perhaps it involves the THP group.\n\nBut I think the most logical and direct retrosynthetic step is the Grignard addition to form the tertiary alcohol (well, it's actually a secondary alcohol with an isopropenyl group).\n\nWait, let me re-examine. C=C(C)C(O) - the carbon bearing the OH has:\n- H (implicit)\n- OH\n- CH2 (going to the rest of the chain)\n- C(CH3)=CH2 (isopropenyl)\n\nSo it's actually a secondary alcohol, not tertiary. The Grignard addition of isopropenyl magnesium bromide to an aldehyde would give exactly this type of secondary alcohol.\n\nI'll go with this answer.\n\nActually, let me reconsider one more time. The question says \"immediate precursors\" and the format is \"precursor 1; precursor 2\". \n\nFor a Grignard reaction, the immediate precursors would be:\n1. The aldehyde\n2. The Grignard reagent (or the halide + Mg)\n\nI think providing the aldehyde and the isopropenyl halide is most appropriate.\n\nLet me finalize:\n\nAnswer: O=CCC/C(C)=C/CC/C(C)=C\\COC1CCCCO1; C=C(C)Br\nDisconnection: C-C bond via Grignard 1,2-addition\n\nHmm, but I want to make sure the SMILES are correct. Let me re-derive the aldehyde.\n\nTarget: C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nIf I remove the isopropenyl group (C=C(C)) and convert the alcohol to an aldehyde:\n\nThe remaining fragment after removing C=C(C) from C=C(C)C(O)R would be:\n- The carbon that was C(O) becomes CHO\n- So: O=CCC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nWait, I need to be more careful. The target is:\nC=C(C)-C(O)(H)-CH2-CH2-/C(CH3)=CH/-CH2-CH2-/C(CH3)=CH\\-CH2-O-THP\n\nRemoving the isopropenyl group and converting the alcohol to aldehyde:\nO=CH-CH2-CH2-/C(CH3)=CH/-CH2-CH2-/C(CH3)=CH\\-CH2-O-THP\n\nIn SMILES: O=CCC/C(C)=C/CC/C(C)=C\\COC1CCCCO1\n\nYes, this looks correct.\n\nFor the isopropenyl precursor, the most common would be isopropenyl magnesium bromide, made from isopropenyl bromide:\nC=C(C)Br or CH2=C(CH3)Br\n\nSo my final answer:\n\nAnswer: O=CCC/C(C)=C/CC/C(C)=C\\COC1CCCCO1; C=C(C)Br\nDisconnection: C-C bond via vinyl Grignard addition to aldehyde"
+  ],
+  "reasoning_tokens_total": 3862,
+  "note": "Best-effort summary from visible traces only. Hidden provider chain-of-thought is not exposed."
+}
+
+=== STEP SUMMARY ===
+Step 1 | duration_ms=226025 | reasoning_tokens=3862
+  Thought: Looking at the target molecule **C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\COC1CCCCO1**, I identify a nerolidol-type terpenoid with a THP-protected primary alcohol. The key retrosynthetic disconnection is at the C–C bond between the isopropenyl group and the hydroxyl-bearing carbon, corresponding to a 1,2-addition of a vinyl nucleophile (Grignard) to an aldehyde. Removing the isopropenyl unit and converting the secondary alcohol to an aldehyde gives the aldehyde fragment. The isopropenyl fragment comes f...
+
+=== SGR SCHEMA ===
+{
+  "sgr_schema_name": "",
+  "sgr_validation_status": "disabled",
+  "sgr_repair_attempted": false,
+  "sgr_fallback_used": false,
+  "sgr_snapshot": null
+}
+
+=== SGR CONTRACT CHECK ===
+<empty>
+
+=== SGR FINAL ANSWER CANDIDATE ===
+<empty>
+
+=== AGENT RUN DETAILS ===
+{
+  "state": "success",
+  "output_preview": "Looking at the target molecule **C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1**, I identify a nerolidol-type terpenoid with a THP-protected primary alcohol. The key retrosynthetic disconnection is at the C–C bond between the isopropenyl group and the hydroxyl-bearing carbon, corresponding to a 1,2-addition of a vinyl nucleophile (Grignard) to an aldehyde. Removing the isopropenyl unit and converting the secondary alcohol to an aldehyde gives the aldehyde fragment. The isopropenyl fragment comes f...",
+  "sgr_schema_name": "",
+  "sgr_validation_status": "disabled",
+  "sgr_repair_attempted": false,
+  "sgr_fallback_used": false,
+  "sgr_payload": null,
+  "step_count": 1,
+  "steps": [
+    {
+      "step_number": 1,
+      "duration_ms": 226025,
+      "thought": "Looking at the target molecule **C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\\COC1CCCCO1**, I identify a nerolidol-type terpenoid with a THP-protected primary alcohol. The key retrosynthetic disconnection is at the C–C bond between the isopropenyl group and the hydroxyl-bearing carbon, corresponding to a 1,2-addition of a vinyl nucleophile (Grignard) to an aldehyde. Removing the isopropenyl unit and converting the secondary alcohol to an aldehyde gives the aldehyde fragment. The isopropenyl fragment comes f...",
+      "code": "",
+      "tool_calls": [],
+      "observations_preview": "",
+      "model_output_preview": "",
+      "error": "",
+      "reasoning_tokens": 3862,
+      "is_final_answer": false
+    }
+  ]
+}
+
+=== AGENT STDOUT/STDERR TRACE ===
+<empty>
+
+=== RAW MODEL ANSWER ===
+Looking at the target molecule **C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\COC1CCCCO1**, I identify a nerolidol-type terpenoid with a THP-protected primary alcohol. The key retrosynthetic disconnection is at the C–C bond between the isopropenyl group and the hydroxyl-bearing carbon, corresponding to a 1,2-addition of a vinyl nucleophile (Grignard) to an aldehyde.
+
+Removing the isopropenyl unit and converting the secondary alcohol to an aldehyde gives the aldehyde fragment. The isopropenyl fragment comes from isopropenyl magnesium bromide (prepared from isopropenyl bromide).
+
+**Answer: O=CCC/C(C)=C/CC/C(C)=C\COC1CCCCO1; C=C(C)Br**
+**Disconnection: C–C bond via vinyl Grignard 1,2-addition to aldehyde**
+
+=== NORMALIZED STUDENT ANSWER ===
+Looking at the target molecule **C=C(C)C(O)CC/C(C)=C/CC/C(C)=C\COC1CCCCO1**, I identify a nerolidol-type terpenoid with a THP-protected primary alcohol. The key retrosynthetic disconnection is at the C–C bond between the isopropenyl group and the hydroxyl-bearing carbon, corresponding to a 1,2-addition of a vinyl nucleophile (Grignard) to an aldehyde. Removing the isopropenyl unit and converting the secondary alcohol to an aldehyde gives the aldehyde fragment. The isopropenyl fragment comes from isopropenyl magnesium bromide (prepared from isopropenyl bromide). **Answer: O=CCC/C(C)=C/CC/C(C)=C\COC1CCCCO1; C=C(C)Br** **Disconnection: C–C bond via vinyl Grignard 1,2-addition to aldehyde**
