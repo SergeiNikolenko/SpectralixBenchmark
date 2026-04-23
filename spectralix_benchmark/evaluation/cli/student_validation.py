@@ -175,6 +175,15 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Append only missing questions to an existing student output JSONL (default: false)",
     )
+    parser.add_argument(
+        "--fail-fast-error-streak",
+        type=int,
+        default=20,
+        help=(
+            "Abort after this many consecutive failed rows with empty answers and zero tokens "
+            "(default: 20; set 0 to disable)"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -213,6 +222,7 @@ def main() -> None:
             verbose_output_enabled=args.verbose_output_enabled,
             verbose_output_path=args.verbose_output_path,
             resume_existing=args.resume_existing,
+            fail_fast_error_streak=args.fail_fast_error_streak,
         )
     except Exception as exc:
         raise SystemExit(f"[ERROR] {exc}") from exc

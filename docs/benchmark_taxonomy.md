@@ -37,6 +37,21 @@ It also moves chemistry IE style role-grounding tasks out of the core depth scor
 - `reference_route_planning` -> `C2`
 - `route_design` -> `C3`
 
+## Level B Scoring Contract
+
+`Level B` is scored as plausible immediate retrosynthesis, not exact recovery of
+the source route. The documented reference answer is treated as one acceptable
+route observed in the source data. It is not the only valid answer.
+
+- `B1` credits chemically plausible immediate precursor sets that can reach the
+  target in one step.
+- `B2` credits chemically plausible immediate precursor sets plus an explicit
+  target-forming disconnection.
+- Answers are penalized for impossible chemistry, multistep route plans, or
+  jumping backward to earlier building blocks.
+- Answers are not penalized merely because they choose a different chemically
+  plausible immediate disconnection than the documented reference route.
+
 ## Metrics
 
 Primary paper-facing aggregate:
@@ -57,9 +72,9 @@ Primary breakdown artifacts:
 - `breakdown_by_task_mode`
 - `breakdown_by_planning_horizon`
 
-## Compatibility
+## Runtime Fields
 
-- Legacy `level` and `answer_type` fields remain present for runtime compatibility.
+- Legacy `level` and `answer_type` fields remain present in runtime rows.
 - Judge rows are enriched with taxonomy metadata fields (`benchmark_suite`, `benchmark_subtrack`, `planning_horizon`, `task_mode`).
 - Run-level metrics expose taxonomy-aware breakdowns in:
   - `breakdown_by_suite`

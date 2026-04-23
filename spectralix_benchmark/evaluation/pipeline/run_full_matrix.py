@@ -513,6 +513,15 @@ def parse_args() -> argparse.Namespace:
         help="Student request retry attempts (default: 3)",
     )
     parser.add_argument(
+        "--fail-fast-error-streak",
+        type=int,
+        default=20,
+        help=(
+            "Abort a student run after this many consecutive failed rows with empty answers and zero tokens "
+            "(default: 20; set 0 to disable)"
+        ),
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -855,6 +864,7 @@ def main() -> None:
                     "agent_config": str(args.agent_config),
                     "agent_reasoning_effort": args.agent_reasoning_effort,
                     "agent_sgr_enabled": _is_truthy(args.agent_sgr_enabled),
+                    "fail_fast_error_streak": args.fail_fast_error_streak,
                     "judge_model": args.judge_model,
                     "judge_reasoning_effort": args.judge_reasoning_effort,
                     "resume_existing": resume_existing,
@@ -893,6 +903,7 @@ def main() -> None:
                     verbose_output_enabled=verbose_output_enabled,
                     verbose_output_path=verbose_output_path,
                     resume_existing=resume_existing,
+                    fail_fast_error_streak=args.fail_fast_error_streak,
                 )
             except Exception as exc:
                 model_manifest["status"] = "failed"

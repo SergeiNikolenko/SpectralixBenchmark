@@ -65,7 +65,9 @@ from the broader `Level A` construction layer.
 
 ## Level B
 
-`Level B` is the single-step retrosynthesis layer.
+`Level B` is the single-step retrosynthesis layer. Judging scores chemically
+plausible immediate precursor and disconnection proposals rather than exact
+recovery of the documented source route.
 
 Included sources:
 
@@ -76,6 +78,10 @@ Primary task subtypes:
 
 - `immediate_precursor_prediction`
 - `immediate_precursor_with_disconnection`
+
+The source precursor set is a documented reference answer. Chemically plausible
+one-step alternatives receive credit when they can reach the same target without
+jumping to earlier building blocks or a multistep route.
 
 ## Level C
 

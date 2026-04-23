@@ -236,6 +236,47 @@ def deterministic_score(answer_type: str, student_answer: Any, canonical_answer:
 
 
 def build_user_prompt(item: Dict[str, Any]) -> str:
+    if str(item.get("level") or "").strip().lower() == "b":
+        return f"""
+<task>
+Grade the chemistry answer against the Level B plausible immediate retrosynthesis contract.
+</task>
+
+<scoring_rules>
+- Score in the range [0.0, 1.0].
+- Use 1.0 when the student answer gives chemically plausible immediate precursors for the target and, when requested, a plausible target-forming disconnection.
+- Treat the documented reference answer as one documented route, not the only acceptable answer.
+- Credit chemically plausible single-step alternatives even when they do not match the documented reference precursor set exactly.
+- Penalize multistep route plans, earlier building blocks, impossible chemistry, and answers that do not plausibly reach the target.
+- Keep llm_comment to one short factual sentence.
+</scoring_rules>
+
+<output_contract>
+Return strict structured output only.
+Keep the comment concise, factual, and evidence-based.
+</output_contract>
+
+<question_context>
+Level: {item.get("level")}
+Question type: {item.get("question_type")}
+Answer type: {item.get("answer_type")}
+Task subtype: {item.get("task_subtype")}
+Difficulty: {item.get("difficulty")}
+</question_context>
+
+<question>
+{item.get("question_text")}
+</question>
+
+<documented_reference_answer>
+{item.get("canonical_answer")}
+</documented_reference_answer>
+
+<student_answer>
+{item.get("student_answer")}
+</student_answer>
+""".strip()
+
     return f"""
 <task>
 Grade the chemistry answer against the canonical answer.
@@ -285,6 +326,25 @@ def build_g_eval_prompt(item: Dict[str, Any]) -> str:
     criteria = "\n".join(f"- {entry}" for entry in spec["criteria"])
     evaluation_steps = "\n".join(f"{idx}. {entry}" for idx, entry in enumerate(spec["evaluation_steps"], start=1))
     rubric = "\n".join(f"- {entry}" for entry in spec["rubric"])
+    is_level_b = str(item.get("level") or "").strip().lower() == "b"
+    reference_section = (
+        f"""
+<reference_answer_role>
+The documented reference answer is one documented route, not the only acceptable answer.
+For Level B, grade chemically plausible immediate alternatives against the target and requested planning depth.
+</reference_answer_role>
+
+<documented_reference_answer>
+{item.get("canonical_answer")}
+</documented_reference_answer>
+""".strip()
+        if is_level_b
+        else f"""
+<canonical_answer>
+{item.get("canonical_answer")}
+</canonical_answer>
+""".strip()
+    )
     return f"""
 <task>
 Evaluate the chemistry answer using the rubric below.
@@ -320,9 +380,7 @@ Difficulty: {item.get("difficulty")}
 {item.get("question_text")}
 </question>
 
-<canonical_answer>
-{item.get("canonical_answer")}
-</canonical_answer>
+{reference_section}
 
 <student_answer>
 {item.get("student_answer")}
@@ -695,6 +753,7 @@ def run_llm_judge(
                                         model_url=judge_model_url,
                                         api_key=judge_api_key,
                                         user_prompt=build_g_eval_prompt(judge_input),
+                                        judge_input=judge_input,
                                         retries=judge_structured_retries,
                                         temperature=temperature,
                                         max_tokens=max_tokens,
@@ -711,6 +770,7 @@ def run_llm_judge(
                                         model_url=judge_model_url,
                                         api_key=judge_api_key,
                                         user_prompt=build_user_prompt(judge_input),
+                                        judge_input=judge_input,
                                         retries=judge_structured_retries,
                                         temperature=temperature,
                                         max_tokens=max_tokens,
@@ -729,6 +789,7 @@ def run_llm_judge(
                                     model_url=judge_model_url,
                                     api_key=judge_api_key,
                                     user_prompt=build_user_prompt(judge_input),
+                                    judge_input=judge_input,
                                     retries=judge_structured_retries,
                                     temperature=temperature,
                                     max_tokens=max_tokens,

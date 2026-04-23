@@ -35,6 +35,10 @@ Balanced by source and difficulty:
 - `ORDerly`: easy / medium / hard
 - `PaRoutes selected_reactions_all`: easy / medium / hard
 
+The paper-facing judge treats source precursor sets as documented reference
+answers. Level B scores plausible immediate one-step retrosynthesis rather than
+exact recovery of the sampled source route.
+
 ### Level C
 
 Balanced by route source and difficulty:

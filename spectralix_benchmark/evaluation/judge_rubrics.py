@@ -79,14 +79,16 @@ LEVEL_SPEC_OVERRIDES: Dict[str, Dict[str, List[str]]] = {
     "a": G_EVAL_SPECS["reaction_description"],
     "b": {
         "criteria": [
-            "Correct immediate precursor set for one retrosynthetic step",
-            "Correct main disconnection at the requested planning depth",
-            "Credit chemically plausible immediate alternatives, but penalize earlier retrosynthetic jumps or unrelated routes",
+            "Chemically plausible immediate precursor set for one retrosynthetic step",
+            "Plausible target-forming disconnection at the requested planning depth",
+            "Use the documented reference route as one acceptable answer, not the only acceptable answer",
+            "Credit chemically plausible alternatives that remain immediate precursors to the same target",
         ],
         "evaluation_steps": [
-            "Identify the expected immediate precursor set and main disconnection from the canonical answer.",
+            "Identify the documented reference precursor set and any documented disconnection.",
             "Check whether the student proposed immediate precursors rather than earlier building blocks or a multistep plan.",
-            "Check whether the student disconnection is chemically plausible and aligned with the same target-forming step.",
+            "Check whether the proposed precursor set and disconnection are chemically plausible for reaching the target in one step.",
+            "Credit a chemically plausible alternative even when it differs from the documented reference route.",
             "Assign a rubric score from 0 to 10.",
         ],
         "rubric": GENERIC_G_EVAL_SPEC["rubric"],
@@ -113,14 +115,16 @@ def get_g_eval_spec(
     if normalized_level == "b" and normalized_task_subtype == "immediate_precursor_with_disconnection":
         spec = {
             "criteria": [
-                "Correct immediate precursor set",
-                "Explicit and correct main disconnection",
-                "No jump to earlier retrosynthetic stages or unrelated alternatives",
+                "Chemically plausible immediate precursor set",
+                "Explicit and chemically plausible main disconnection",
+                "The documented reference route is useful evidence but not the only acceptable answer",
+                "No jump to earlier retrosynthetic stages or multistep route plans",
             ],
             "evaluation_steps": [
-                "Identify the canonical immediate precursor set and disconnection.",
-                "Check whether the student answer includes both immediate precursors and a matching disconnection.",
-                "Penalize answers that skip backward to earlier building blocks or propose a different route family.",
+                "Identify the documented reference precursor set and disconnection.",
+                "Check whether the student answer includes immediate precursors and a plausible target-forming disconnection.",
+                "Credit a chemically plausible alternative immediate disconnection if it can reach the same target in one step.",
+                "Penalize answers that skip backward to earlier building blocks or provide a multistep route instead of an immediate disconnection.",
                 "Assign a rubric score from 0 to 10.",
             ],
             "rubric": GENERIC_G_EVAL_SPEC["rubric"],

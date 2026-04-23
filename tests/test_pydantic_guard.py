@@ -150,6 +150,36 @@ class JudgeStructuredTests(unittest.TestCase):
         spec = get_g_eval_spec("full_synthesis")
         self.assertTrue(any("route" in line.lower() for line in spec["criteria"]))
 
+    def test_level_b_rubric_scores_plausible_immediate_alternatives(self):
+        spec = get_g_eval_spec(
+            "text",
+            level="B",
+            task_subtype="immediate_precursor_with_disconnection",
+        )
+        rubric_text = "\n".join(spec["criteria"] + spec["evaluation_steps"]).lower()
+        self.assertIn("documented reference", rubric_text)
+        self.assertIn("not the only acceptable", rubric_text)
+        self.assertIn("chemically plausible alternative", rubric_text)
+        self.assertNotIn("matching disconnection", rubric_text)
+        self.assertNotIn("different route family", rubric_text)
+
+    def test_level_b_g_eval_prompt_marks_reference_answer_as_non_exhaustive(self):
+        prompt = build_g_eval_prompt(
+            {
+                "level": "B",
+                "question_type": "text",
+                "answer_type": "text",
+                "task_subtype": "immediate_precursor_with_disconnection",
+                "difficulty": "medium",
+                "question_text": "Given the product, propose immediate precursors and a plausible disconnection.",
+                "canonical_answer": "{\"precursor_set\": [\"A\", \"B\"]}",
+                "student_answer": "A chemically plausible single-step alternative.",
+            }
+        )
+        self.assertIn("<documented_reference_answer>", prompt)
+        self.assertIn("one documented route, not the only acceptable answer", prompt)
+        self.assertNotIn("<canonical_answer>", prompt)
+
     def test_structured_quota_error_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp = Path(tmp_dir)

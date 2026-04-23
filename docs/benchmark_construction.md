@@ -84,6 +84,11 @@ Representative task subtypes:
 - `ORDerly retrosynthesis`
 - `PaRoutes selected_reactions_all`
 
+The source reaction provides a documented reference precursor set. It is not
+treated as an exclusive gold route during judging: `Level B` scoring credits
+chemically plausible immediate alternatives that can reach the same target in one
+step, and penalizes earlier retrosynthetic jumps or multistep route plans.
+
 Representative task subtypes:
 
 - `immediate_precursor_prediction`

@@ -165,14 +165,14 @@ class AgentRuntime:
             self._last_run_details = result
             if str(result.get("state") or "").strip().lower() != "success":
                 message = str(result.get("error") or result.get("output") or "agent worker returned error state").strip()
-                raise AgentRuntimeError(status="agent_step_error", message=message[:240] or "agent worker failed")
+                raise AgentRuntimeError(status="agent_step_error", message=message or "agent worker failed")
             return result
         except AgentRuntimeError:
             raise
         except Exception as exc:
             status = self._classify_error(exc)
             self.logger.exception("Agent runtime task failed with status=%s", status)
-            raise AgentRuntimeError(status=status, message=str(exc)[:240]) from exc
+            raise AgentRuntimeError(status=status, message=str(exc)) from exc
 
     def _run_local_worker(self, payload: Dict[str, Any], *, timeout_seconds: int) -> Dict[str, Any]:
         process = subprocess.run(
@@ -187,7 +187,7 @@ class AgentRuntime:
         if process.returncode != 0:
             raise AgentRuntimeError(
                 status="agent_step_error",
-                message=(process.stderr or process.stdout or "local worker failed").strip()[:240],
+                message=(process.stderr or process.stdout or "local worker failed").strip(),
             )
         return json.loads((process.stdout or "").strip() or "{}")
 

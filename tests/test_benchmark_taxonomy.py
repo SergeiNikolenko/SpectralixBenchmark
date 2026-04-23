@@ -104,3 +104,17 @@ class TaxonomyMetadataTests(unittest.TestCase):
         self.assertEqual(metadata["benchmark_suite"], "B")
         self.assertEqual(metadata["benchmark_subtrack"], "B0")
         self.assertEqual(metadata["planning_horizon"], "single_step")
+        self.assertEqual(metadata["eval_contract_id"], "level_b.plausible_immediate_retrosynthesis.v2")
+        self.assertEqual(metadata["judge_rubric_id"], "g_eval.level_b.plausible_immediate_retrosynthesis.v2")
+
+    def test_level_b_disconnection_metadata_uses_plausibility_contract(self):
+        metadata = get_benchmark_taxonomy_metadata(
+            {"level": "B", "task_subtype": "immediate_precursor_with_disconnection"}
+        )
+        self.assertEqual(metadata["benchmark_subtrack"], "B2")
+        self.assertEqual(metadata["eval_contract_id"], "level_b.plausible_immediate_disconnection.v2")
+        self.assertEqual(
+            metadata["expected_output_schema"],
+            "plausible_immediate_precursor_set_with_disconnection",
+        )
+        self.assertEqual(metadata["judge_rubric_id"], "g_eval.level_b.plausible_immediate_disconnection.v2")

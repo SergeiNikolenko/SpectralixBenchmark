@@ -25,6 +25,13 @@ paper-facing evaluation workflow.
 - `PAPER_EVALS.md`
   - compact description of eval-subset balancing
 
+## Level B Judge Contract
+
+Level B evaluation scores plausible immediate retrosynthesis. The documented
+source precursor set is a reference answer, not an exhaustive list of correct
+answers. Judge runs should credit chemically plausible one-step alternatives and
+penalize multistep plans or earlier-stage building blocks.
+
 ## Legacy Compatibility
 
 - `benchmark_v1_0.jsonl`

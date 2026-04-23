@@ -11,11 +11,17 @@ import httpx
 from openai import OpenAI
 
 from .prompts import build_student_sgr_task, build_student_task
-from .sgr_schemas import compact_sgr_payload, get_sgr_schema_spec, schema_template_lines, validate_sgr_payload
+from .sgr_schemas import (
+    extract_contract_check,
+    extract_final_answer_value,
+    get_sgr_schema_spec,
+    schema_template_lines,
+    validate_sgr_payload,
+)
 from .tool_registry import build_tool_definitions
 
 
-def _build_client(model: Dict[str, Any]) -> OpenAI:
+def _build_client(model: Dict[str, Any], *, request_timeout_sec: float | None = None) -> OpenAI:
     api_base = str(model["api_base"]).rstrip("/")
     header_name = (os.getenv("OPENAI_API_KEY_HEADER") or "Authorization").strip() or "Authorization"
     prefix = (os.getenv("OPENAI_API_KEY_PREFIX") or "Bearer").strip()
@@ -30,14 +36,21 @@ def _build_client(model: Dict[str, Any]) -> OpenAI:
         token_value = f"{prefix} {api_key}".strip() if prefix else api_key
         default_headers[header_name] = token_value
         api_key = "unused_api_key"
+    default_headers.setdefault("Connection", "close")
+    client_timeout = max(60.0, float(request_timeout_sec or model.get("request_timeout_sec") or 60.0))
     client_kwargs: Dict[str, Any] = {
         "base_url": api_base,
         "api_key": api_key,
         "default_headers": default_headers or None,
-        "timeout": 60.0,
+        "timeout": client_timeout,
     }
     if use_local_transport:
-        client_kwargs["http_client"] = httpx.Client(timeout=60.0, trust_env=False)
+        client_kwargs["http_client"] = httpx.Client(
+            timeout=client_timeout,
+            trust_env=False,
+            headers={"Connection": "close"},
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=0),
+        )
     return OpenAI(**client_kwargs)
 
 
@@ -98,6 +111,16 @@ def _chat_completion(
     return client.chat.completions.create(**kwargs)
 
 
+def _tool_support_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "does not support tools" in text or "tool" in text and "invalid_request_error" in text
+
+
+def _env_truthy(name: str) -> bool:
+    value = (os.getenv(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _is_transient_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return any(marker in text for marker in ["429", "rate limit", "timeout", "temporarily unavailable", "503", "502", "500"])
@@ -121,7 +144,9 @@ def _chat_completion_with_retry(
                 messages=messages,
                 tool_definitions=tool_definitions,
             )
-        except Exception:
+        except Exception as exc:
+            if _tool_support_error(exc) or not _is_transient_error(exc):
+                raise
             if attempt >= max_attempts:
                 raise
             time.sleep(float(attempt))
@@ -147,6 +172,39 @@ def _extract_json_object(raw_text: str) -> Dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("json_is_not_object")
     return parsed
+
+
+def _manual_tool_protocol_message(tool_definitions: List[Any]) -> Dict[str, str]:
+    tool_lines = []
+    for item in tool_definitions:
+        schema_json = json.dumps(item.schema, ensure_ascii=False, separators=(",", ":"))
+        tool_lines.append(f"- {item.name}: {item.description} | json_schema={schema_json}")
+    return {
+        "role": "system",
+        "content": (
+            "Native function-calling is unavailable for this model. "
+            "If you need a tool, respond with exactly one JSON object and nothing else in this format: "
+            '{"tool_call":{"name":"<tool_name>","arguments":{...}}}. '
+            "Use only one tool call per message. "
+            "If no tool is needed, return the final benchmark answer as plain text instead.\n"
+            "Available tools:\n"
+            + ("\n".join(tool_lines) if tool_lines else "- none")
+        ),
+    }
+
+
+def _extract_manual_tool_call(raw_text: str, tool_lookup: Dict[str, Any]) -> Dict[str, Any] | None:
+    try:
+        parsed = _extract_json_object(raw_text)
+    except Exception:
+        return None
+    if "tool_call" in parsed and isinstance(parsed["tool_call"], dict):
+        parsed = parsed["tool_call"]
+    name = str(parsed.get("name") or "").strip()
+    arguments = parsed.get("arguments")
+    if not name or name not in tool_lookup or not isinstance(arguments, dict):
+        return None
+    return {"name": name, "arguments": arguments}
 
 
 def _step_budget_message(*, step_number: int, max_steps: int, phase: str) -> Dict[str, str]:
@@ -210,6 +268,10 @@ def _sgr_tool_definitions(question: Dict[str, Any], tool_definitions: List[Any])
     else:
         allowed = set()
     return [item for item in tool_definitions if item.name in allowed]
+
+
+def _student_tool_definitions(question: Dict[str, Any], tool_definitions: List[Any]) -> List[Any]:
+    return _sgr_tool_definitions(question, tool_definitions)
 
 
 def _generate_sgr_payload(
@@ -321,7 +383,7 @@ def _run_tool_loop(
 ) -> Dict[str, Any]:
     model = payload["model"]
     config = payload["config"]
-    client = _build_client(model)
+    client = _build_client(model, request_timeout_sec=float(payload.get("timeout_sec") or 60.0))
     tool_definitions = list(tool_definitions) if tool_definitions is not None else build_tool_definitions(str(payload["tools_profile"]), config)
     tool_lookup = {item.name: item for item in tool_definitions}
 
@@ -337,6 +399,7 @@ def _run_tool_loop(
     requests_per_minute = max(0, int(model.get("requests_per_minute") or 0))
     min_interval_seconds = (60.0 / requests_per_minute) if requests_per_minute > 0 else 0.0
     next_request_not_before = 0.0
+    manual_tool_mode = bool(tool_definitions) and _env_truthy("SPECTRALIX_FORCE_MANUAL_TOOL_PROTOCOL")
 
     max_steps = max(1, int(payload.get("max_steps") or 1))
     for step_number in range(1, max_steps + 1):
@@ -353,12 +416,35 @@ def _run_tool_loop(
                 phase=step_phase,
             )
         )
-        response = _chat_completion_with_retry(
-            client=client,
-            model=model,
-            messages=request_messages,
-            tool_definitions=tool_definitions,
-        )
+        if manual_tool_mode and tool_definitions:
+            request_messages.append(_manual_tool_protocol_message(tool_definitions))
+        try:
+            response = _chat_completion_with_retry(
+                client=client,
+                model=model,
+                messages=request_messages,
+                tool_definitions=[] if manual_tool_mode else tool_definitions,
+            )
+        except Exception as exc:
+            if tool_definitions and not manual_tool_mode and _tool_support_error(exc):
+                manual_tool_mode = True
+                request_messages = list(messages)
+                request_messages.append(
+                    _step_budget_message(
+                        step_number=step_number,
+                        max_steps=max_steps,
+                        phase=step_phase,
+                    )
+                )
+                request_messages.append(_manual_tool_protocol_message(tool_definitions))
+                response = _chat_completion_with_retry(
+                    client=client,
+                    model=model,
+                    messages=request_messages,
+                    tool_definitions=[],
+                )
+            else:
+                raise
         if min_interval_seconds > 0:
             next_request_not_before = time.monotonic() + min_interval_seconds
         duration = time.perf_counter() - started_at
@@ -371,6 +457,7 @@ def _run_tool_loop(
         step_payload: Dict[str, Any] = {
             "step_number": step_number + step_number_offset,
             "phase": step_phase or "main",
+            "tool_protocol": "manual_json" if manual_tool_mode else "native",
             "timing": {"duration": duration},
             "model_output_message": {
                 "content": assistant_text,
@@ -378,6 +465,35 @@ def _run_tool_loop(
             },
             "tool_calls": [],
         }
+
+        manual_tool_call = _extract_manual_tool_call(assistant_text, tool_lookup) if manual_tool_mode and tool_definitions else None
+        if manual_tool_call is not None:
+            tool_name = str(manual_tool_call["name"])
+            tool_definition = tool_lookup[tool_name]
+            try:
+                tool_output = str(tool_definition.func(**manual_tool_call["arguments"]))
+            except Exception as exc:
+                tool_output = json.dumps({"status": "error", "reason": f"tool_call_error:{exc}"})
+            step_payload["tool_calls"].append(
+                {
+                    "name": tool_name,
+                    "arguments": json.dumps(manual_tool_call["arguments"], ensure_ascii=False),
+                    "output_preview": tool_output[:500],
+                }
+            )
+            messages.append({"role": "assistant", "content": assistant_text})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Tool result for {tool_name}:\n{tool_output}\n\n"
+                        "Continue. If another tool is needed, respond with one JSON tool_call object only. "
+                        "Otherwise provide the final benchmark answer as plain text."
+                    ),
+                }
+            )
+            steps.append(step_payload)
+            continue
 
         if not tool_calls:
             final_answer = assistant_text
@@ -451,22 +567,38 @@ def _student_messages(payload: Dict[str, Any], tool_definitions: List[Any]) -> L
 
 
 def _run_student_with_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
+    question = payload.get("question") or {}
     tool_definitions = build_tool_definitions(str(payload["tools_profile"]), payload["config"])
+    student_tool_definitions = _student_tool_definitions(question, tool_definitions)
     sgr_meta = _generate_sgr_payload(payload=payload, tool_definitions=tool_definitions)
     student_payload = dict(payload)
+    sgr_candidate_final_answer = ""
     if isinstance(sgr_meta.get("sgr_payload"), dict):
+        sgr_payload = sgr_meta["sgr_payload"]
+        sgr_candidate_final_answer = extract_final_answer_value(sgr_payload)
         student_payload["sgr_context"] = {
             "schema_name": str(sgr_meta.get("sgr_schema_name") or ""),
-            "payload": compact_sgr_payload(sgr_meta["sgr_payload"]),
+            "contract_check": extract_contract_check(sgr_payload),
+            "candidate_final_answer": sgr_candidate_final_answer,
         }
     sgr_steps = list(sgr_meta.get("steps") or [])
-    result = _run_tool_loop(
-        payload=student_payload,
-        messages=_student_messages(student_payload, tool_definitions),
-        tool_definitions=tool_definitions,
-        step_phase="final_answer",
-        step_number_offset=len(sgr_steps),
-    )
+    try:
+        result = _run_tool_loop(
+            payload=student_payload,
+            messages=_student_messages(student_payload, student_tool_definitions),
+            tool_definitions=student_tool_definitions,
+            step_phase="final_answer",
+            step_number_offset=len(sgr_steps),
+        )
+    except Exception:
+        if not sgr_candidate_final_answer:
+            raise
+        result = {
+            "state": "success",
+            "output": sgr_candidate_final_answer,
+            "error": "",
+            "steps": sgr_steps,
+        }
     result["steps"] = sgr_steps + list(result.get("steps") or [])
     result["sgr_schema_name"] = sgr_meta.get("sgr_schema_name")
     result["sgr_payload"] = sgr_meta.get("sgr_payload")
@@ -479,10 +611,12 @@ def _run_student_with_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _run_student_without_sgr(payload: Dict[str, Any]) -> Dict[str, Any]:
     tool_definitions = build_tool_definitions(str(payload["tools_profile"]), payload["config"])
+    question = payload.get("question") or {}
+    student_tool_definitions = _student_tool_definitions(question, tool_definitions)
     result = _run_tool_loop(
         payload=payload,
-        messages=_student_messages(payload, tool_definitions),
-        tool_definitions=tool_definitions,
+        messages=_student_messages(payload, student_tool_definitions),
+        tool_definitions=student_tool_definitions,
         step_phase="final_answer",
     )
     result["sgr_schema_name"] = ""

@@ -65,6 +65,14 @@ Deterministic scoring is used for exact or mostly exact answer types such as:
 
 This split is implemented in `spectralix_benchmark.evaluation.llm_judge`.
 
+## Level B Reference Answers
+
+For `Level B`, the source precursor set is rendered to the judge as a documented
+reference answer rather than an exclusive canonical answer. The judge should
+credit chemically plausible immediate precursor or disconnection alternatives
+that can reach the same target in one step. This avoids turning single-step
+retrosynthesis into exact recovery of one hidden source route.
+
 ## Structured Judge Output
 
 The judge model is required to return a structured object with fields such as:

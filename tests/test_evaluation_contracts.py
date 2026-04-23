@@ -122,6 +122,31 @@ class _QuotaAgentRuntime:
         return {"executor_type": "local", "sandbox_runtime": "local_worker"}
 
 
+class _EmptyFailureAgentRuntime:
+    def __init__(self, *args, **kwargs):
+        _ = args
+        _ = kwargs
+
+    def preflight(self):
+        return None
+
+    def solve_question(self, question):
+        _ = question
+        raise student_validation_module.AgentRuntimeError(
+            status="agent_step_error",
+            message="httpx transport failure: " + ("details " * 80),
+        )
+
+    def close(self):
+        return None
+
+    def get_last_run_details(self):
+        return None
+
+    def get_runtime_metadata(self):
+        return {"executor_type": "local", "sandbox_runtime": "local_worker"}
+
+
 def _write_benchmark(path: Path) -> None:
     rows = [
         {
@@ -243,6 +268,33 @@ class StudentValidationContractTests(unittest.TestCase):
             with mock.patch.object(student_validation_pipeline, "AgentRuntime", _QuotaAgentRuntime):
                 with self.assertRaises(student_validation_module.ModelLimitExceededError):
                     _run_student_inference(benchmark_path, output_path)
+
+    def test_student_run_aborts_after_empty_zero_token_error_streak(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            benchmark_path = tmp_path / "benchmark.jsonl"
+            output_path = tmp_path / "student_output.jsonl"
+            _write_benchmark(benchmark_path)
+
+            with mock.patch.object(student_validation_pipeline, "AgentRuntime", _EmptyFailureAgentRuntime):
+                with self.assertRaisesRegex(RuntimeError, "empty zero-token failures"):
+                    _run_student_inference(
+                        benchmark_path,
+                        output_path,
+                        fail_fast_error_streak=2,
+                        max_error_len=48,
+                    )
+
+            rows = _read_jsonl(output_path)
+            self.assertEqual(len(rows), 2)
+            self.assertTrue(rows[0]["student_error"].endswith("..."))
+            self.assertLessEqual(len(rows[0]["student_error"]), 48)
+
+            trace_files = sorted((tmp_path / "traces").glob("*.log"))
+            self.assertEqual(len(trace_files), 2)
+            trace_sample = trace_files[0].read_text(encoding="utf-8")
+            self.assertIn("httpx transport failure", trace_sample)
+            self.assertIn("details details details details details", trace_sample)
 
 
 class RunFullMatrixContractTests(unittest.TestCase):

@@ -32,7 +32,7 @@ Data files:
 
 Primary objective:
 
-- propose immediate precursors and local disconnection logic
+- propose chemically plausible immediate precursors and local disconnection logic
 
 Typical task subtypes:
 
@@ -44,6 +44,15 @@ Suggested paper-facing subtracks:
 - `B1` precursor proposal
 - `B2` disconnection justification
 - `B3` constraint-aware retrosynthesis
+
+Scoring contract:
+
+- the documented source precursor set is one acceptable reference route, not the
+  only correct answer
+- chemically plausible one-step alternatives receive credit when they can reach
+  the same target at the requested planning depth
+- multistep plans, earlier-stage building blocks, and chemically implausible
+  disconnections are penalized
 
 Data files:
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from typing import Any, Dict, Iterable, List
 
 
@@ -163,6 +165,18 @@ FORMAT_INSTRUCTIONS = {
     ),
 }
 
+PROCEDURE_TEXT_TASK_SUBTYPES = {
+    "reagent_role_identification",
+    "condition_role_identification",
+}
+
+MAX_PROCEDURE_EXCERPT_CHARS = 4000
+
+
+def _env_truthy(name: str) -> bool:
+    value = (os.getenv(name) or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
 
 def _format_instruction(answer_type: str) -> str:
     normalized = (answer_type or "").strip().lower()
@@ -217,16 +231,84 @@ def _format_sgr_context(sgr_context: Dict[str, Any] | None) -> str:
     return json.dumps(sgr_context, ensure_ascii=False, indent=2)
 
 
+def _extract_procedure_text(question: Dict[str, Any]) -> str:
+    for key in ("benchmark_v3_input", "input"):
+        value = question.get(key)
+        if isinstance(value, dict):
+            text = str(value.get("procedure_text") or "").strip()
+            if text:
+                return text
+    return ""
+
+
+def _procedure_excerpt(text: str, max_chars: int = MAX_PROCEDURE_EXCERPT_CHARS) -> str:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return ""
+
+    for pattern in (
+        r"\nExample\s+\d+\b",
+        r"\nEXAMPLES\b",
+        r"\nPreparation of\b",
+    ):
+        match = re.search(pattern, normalized)
+        if match:
+            normalized = normalized[match.start() :].lstrip()
+            break
+
+    if len(normalized) <= max_chars:
+        return normalized
+
+    head = normalized[: max_chars - len("\n...[truncated]...\n")]
+    return head.rstrip() + "\n...[truncated]..."
+
+
+def _rewrite_long_procedure_question(question: Dict[str, Any], question_text: str) -> str:
+    task_subtype = str(question.get("task_subtype") or "").strip().lower()
+    if task_subtype not in PROCEDURE_TEXT_TASK_SUBTYPES:
+        return question_text
+
+    if len(question_text) <= MAX_PROCEDURE_EXCERPT_CHARS + 4000:
+        return question_text
+
+    excerpt_source = _extract_procedure_text(question) or question_text
+    excerpt = _procedure_excerpt(excerpt_source)
+    if not excerpt:
+        return question_text
+
+    level = str(question.get("level") or "").strip()
+    answer_type = str(question.get("answer_type") or "").strip()
+    expected_schema = str(question.get("expected_output_schema") or "role_mapping").strip()
+    return (
+        "Identify reactants, reagents, solvents, and products from the patent procedure text.\n\n"
+        "Use the structured benchmark context below as the full task specification.\n"
+        "The procedure text was truncated to the most relevant experimental excerpt to fit model limits.\n"
+        "Return the best chemistry answer grounded only in this context.\n\n"
+        "<benchmark_context>\n"
+        "{\n"
+        f'  "level": "{level}",\n'
+        f'  "task_subtype": "{task_subtype}",\n'
+        f'  "answer_type": "{answer_type}",\n'
+        f'  "expected_output_schema": "{expected_schema}",\n'
+        '  "input": {\n'
+        f'    "procedure_text": {json.dumps(excerpt, ensure_ascii=False)}\n'
+        "  }\n"
+        "}\n"
+        "</benchmark_context>"
+    )
+
+
 def _extract_prompt_context(
     question: Dict[str, Any],
     runtime_context: Dict[str, Any] | None,
 ) -> Dict[str, Any]:
     context = runtime_context or {}
+    question_text = _rewrite_long_procedure_question(question, str(question.get("question_text", "") or ""))
     return {
         "level": str(question.get("level", "") or ""),
         "answer_type": str(question.get("answer_type", "") or ""),
         "task_subtype": str(question.get("task_subtype", "") or ""),
-        "question_text": question.get("question_text", ""),
+        "question_text": question_text,
         "tools_profile": str(context.get("tools_profile") or "minimal"),
         "workspace_root": str(context.get("workspace_root") or "/sandbox/workspace"),
         "available_tools": list(context.get("available_tools") or []),
@@ -245,6 +327,20 @@ def build_student_sgr_task(
     schema_lines = runtime_context.get("sgr_schema_lines") or ""
     if not schema_lines and schema_template:
         schema_lines = json.dumps(schema_template, ensure_ascii=False, indent=2)
+    if _env_truthy("SPECTRALIX_COMPACT_SGR_PROMPT"):
+        return (
+            "Return exactly one JSON object and nothing else.\n"
+            "Fill every required field from the chemistry question only.\n"
+            "Do not add markdown, explanations, or prose outside the JSON.\n"
+            f"Level: {prompt_context['level']}\n"
+            f"Answer type: {prompt_context['answer_type']}\n"
+            f"Task subtype: {prompt_context['task_subtype']}\n"
+            f"Schema name: {schema_name}\n\n"
+            "Schema:\n"
+            f"{schema_lines or '{}'}\n\n"
+            "Question:\n"
+            f"{prompt_context['question_text']}"
+        )
     return (
         "<role>\n"
         f"{STUDENT_SGR_SYSTEM_PROMPT}\n"

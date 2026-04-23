@@ -18,7 +18,10 @@ STATUS_OK = "ok"
 TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 FALSY_VALUES = {"0", "false", "no", "n", "off"}
 MODEL_LIMIT_ERROR_MARKERS = (
+    "402",
     "429",
+    "budget",
+    "бюджет",
     "insufficient_quota",
     "quota exceeded",
     "quota_exceeded",
@@ -182,9 +185,9 @@ def normalize_student_answer(
     return _clip_text(compact, max_len)
 
 
-def _sanitize_error(error: Exception, limit: int = 240) -> str:
+def _sanitize_error(error: Exception, limit: Optional[int] = 240) -> str:
     message = str(error).strip() or error.__class__.__name__
-    if len(message) > limit:
+    if limit is not None and limit > 0 and len(message) > limit:
         return message[: limit - 3] + "..."
     return message
 
@@ -815,6 +818,19 @@ def _build_student_result_row(
     }
 
 
+def _is_empty_zero_token_failure(
+    *,
+    student_status: str,
+    student_answer: str,
+    token_totals: Dict[str, int],
+) -> bool:
+    if student_status == STATUS_OK:
+        return False
+    if student_answer.strip():
+        return False
+    return int(token_totals.get("student_total_tokens") or 0) == 0
+
+
 def call_agent(
     runtime: AgentRuntime,
     question: Dict[str, Any],
@@ -839,7 +855,7 @@ def call_agent(
             status = "parse_error"
             if isinstance(exc, AgentRuntimeError):
                 status = exc.status or "parse_error"
-            final_error = StudentCallError(status, _sanitize_error(exc))
+            final_error = StudentCallError(status, _sanitize_error(exc, limit=None))
 
         _wait_or_raise_retry(
             attempt=attempt,
@@ -879,6 +895,7 @@ def run_benchmark_inference(
     verbose_output_enabled: bool = False,
     verbose_output_path: Optional[Path] = None,
     resume_existing: bool = False,
+    fail_fast_error_streak: int = 20,
 ):
     questions = load_benchmark_questions(benchmark_path=benchmark_path)
     if limit is not None and limit >= 0:
@@ -927,6 +944,7 @@ def run_benchmark_inference(
         completed_keys = _load_completed_keys_from_jsonl(output_path)
 
     try:
+        consecutive_empty_zero_token_failures = 0
         output_mode = "a" if resume_existing else "w"
         verbose_context = (
             resolved_verbose_output_path.open(output_mode, encoding="utf-8")
@@ -1014,8 +1032,8 @@ def run_benchmark_inference(
 
                 elapsed_ms = int((time.perf_counter() - started_at) * 1000)
 
-                if student_error:
-                    student_error = student_error[:max_error_len]
+                full_student_error = student_error
+                stored_student_error = _sanitize_error(StudentCallError(student_status, student_error), limit=max_error_len) if student_error else ""
 
                 trace_log_path: Optional[Path] = None
                 if trace_log_enabled:
@@ -1029,7 +1047,7 @@ def run_benchmark_inference(
                         question=question,
                         model_name=model_name,
                         student_status=student_status,
-                        student_error=student_error,
+                        student_error=full_student_error,
                         student_answer=student_answer,
                         raw_answer=raw_answer,
                         elapsed_ms=elapsed_ms,
@@ -1045,7 +1063,7 @@ def run_benchmark_inference(
                     question=question,
                     student_answer=student_answer,
                     student_status=student_status,
-                    student_error=student_error,
+                    student_error=stored_student_error,
                     elapsed_ms=elapsed_ms,
                     token_totals=token_totals,
                 )
@@ -1069,6 +1087,22 @@ def run_benchmark_inference(
                     }
                     f_verbose.write(json.dumps(verbose_result, ensure_ascii=False) + "\n")
                     f_verbose.flush()
+
+                if _is_empty_zero_token_failure(
+                    student_status=student_status,
+                    student_answer=student_answer,
+                    token_totals=token_totals,
+                ):
+                    consecutive_empty_zero_token_failures += 1
+                else:
+                    consecutive_empty_zero_token_failures = 0
+
+                if fail_fast_error_streak > 0 and consecutive_empty_zero_token_failures >= fail_fast_error_streak:
+                    raise RuntimeError(
+                        "Aborting student run after "
+                        f"{consecutive_empty_zero_token_failures} consecutive empty zero-token failures. "
+                        "This usually indicates an upstream HTTP/provider outage, not benchmark progress."
+                    )
     finally:
         runtime.close()
 
@@ -1253,6 +1287,15 @@ if __name__ == "__main__":
         default=False,
         help="Append only missing questions to an existing student output JSONL (default: false)",
     )
+    parser.add_argument(
+        "--fail-fast-error-streak",
+        type=int,
+        default=20,
+        help=(
+            "Abort after this many consecutive failed rows with empty answers and zero tokens "
+            "(default: 20; set 0 to disable)"
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1288,6 +1331,7 @@ if __name__ == "__main__":
             verbose_output_enabled=args.verbose_output_enabled,
             verbose_output_path=args.verbose_output_path,
             resume_existing=args.resume_existing,
+            fail_fast_error_streak=args.fail_fast_error_streak,
         )
     except Exception as exc:
         raise SystemExit(f"[ERROR] {exc}") from exc
