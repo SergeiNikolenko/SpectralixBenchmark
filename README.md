@@ -7,7 +7,6 @@ It is designed to measure performance across increasing planning depth rather
 than as a single mixed chemistry test set.
 
 ## What The Benchmark Measures
-
 `benchmark_v3` is organized as a three-level ladder:
 
 - `Level A`: local reaction understanding
